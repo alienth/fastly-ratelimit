@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/juju/ratelimit"
+	"gopkg.in/mcuadros/go-syslog.v2"
 )
 
 // getIPs takes in an haproxy log line and returns the client IP and the CDN
@@ -116,26 +117,48 @@ func (l *ipList) contains(checkIP *net.IP) bool {
 func main() {
 	var hits map[string]*ratelimit.Bucket
 	hits = make(map[string]*ratelimit.Bucket)
-	//	for line := range t.Lines {
-	scanner := bufio.NewScanner(os.Stdin)
+
+	channel := make(syslog.LogPartsChannel)
+	handler := syslog.NewChannelHandler(channel)
+
+	server := syslog.NewServer()
+	server.SetFormat(syslog.RFC3164)
+	server.SetHandler(handler)
+	if err := server.ListenUDP("0.0.0.0:514"); err != nil {
+		fmt.Println(err)
+		return
+	}
+	if err := server.Boot(); err != nil {
+		fmt.Println(err)
+		return
+	}
+
 	whitelist := readIPList("/etc/haproxy-shared/whitelist-ips")
-	for scanner.Scan() {
-		line := scanner.Text()
-		clientIP, cdnIP := getIPs(line)
-		if cdnIP == nil || clientIP == nil {
-			continue
-		}
-		if _, found := hits[cdnIP.String()]; !found {
-			hits[cdnIP.String()] = ratelimit.NewBucket(time.Duration(3)*time.Minute, 180)
-		}
-		_, isSoonerThanMaxWait := hits[cdnIP.String()].TakeMaxDuration(1, 0)
-		if !isSoonerThanMaxWait {
-			if whitelist.contains(cdnIP) {
-				//fmt.Println("but is whitelisted so we don't care.")
-			} else {
-				fmt.Printf("Over limit: %s\n", cdnIP.String())
+
+	go func(channel syslog.LogPartsChannel) {
+		for logParts := range channel {
+			var line string
+			var ok bool
+			if line, ok = logParts["content"].(string); !ok || line == "" {
+				continue
+			}
+			clientIP, cdnIP := getIPs(line)
+			if cdnIP == nil || clientIP == nil {
+				continue
+			}
+			if _, found := hits[cdnIP.String()]; !found {
+				hits[cdnIP.String()] = ratelimit.NewBucket(time.Duration(3)*time.Minute, 180)
+			}
+			_, isSoonerThanMaxWait := hits[cdnIP.String()].TakeMaxDuration(1, 0)
+			if !isSoonerThanMaxWait {
+				if whitelist.contains(cdnIP) {
+					//fmt.Println("but is whitelisted so we don't care.")
+				} else {
+					fmt.Printf("Over limit: %s\n", cdnIP.String())
+				}
 			}
 		}
+	}(channel)
 
-	}
+	server.Wait()
 }
