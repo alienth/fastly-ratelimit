@@ -114,10 +114,6 @@ func (l *ipList) contains(checkIP *net.IP) bool {
 }
 
 func main() {
-	//	t, err := tail.TailFile(os.Args[1], tail.Config{Follow: true})
-	//if err != nil {
-	//	fmt.Println(err)
-	//}
 	var hits map[string]*ratelimit.Bucket
 	hits = make(map[string]*ratelimit.Bucket)
 	//	for line := range t.Lines {
@@ -130,15 +126,14 @@ func main() {
 			continue
 		}
 		if _, found := hits[cdnIP.String()]; !found {
-			hits[cdnIP.String()] = ratelimit.NewBucket(time.Duration(60)*time.Second, 20)
+			hits[cdnIP.String()] = ratelimit.NewBucket(time.Duration(3)*time.Minute, 180)
 		}
 		_, isSoonerThanMaxWait := hits[cdnIP.String()].TakeMaxDuration(1, 0)
 		if !isSoonerThanMaxWait {
-			fmt.Printf("IP %s over limit... ", cdnIP.String())
-			if whitelist.contains(cdnIP) || whitelist.contains(clientIP) {
-				fmt.Println("but is whitelisted so we don't care.")
+			if whitelist.contains(cdnIP) {
+				//fmt.Println("but is whitelisted so we don't care.")
 			} else {
-				fmt.Println("we should ban.")
+				fmt.Printf("Over limit: %s\n", cdnIP.String())
 			}
 		}
 
