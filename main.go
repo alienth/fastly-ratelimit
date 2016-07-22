@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/juju/ratelimit"
+	"github.com/urfave/cli"
 	"gopkg.in/mcuadros/go-syslog.v2"
 )
 
@@ -66,9 +67,12 @@ type ipList struct {
 	nets []net.IPNet
 }
 
-func readIPList(filename string) *ipList {
+func readIPList(filename string) (*ipList, error) {
 	var list ipList
-	f, _ := os.Open(filename)
+	f, err := os.Open(filename)
+	if err != nil {
+		return nil, err
+	}
 	scanner := bufio.NewScanner(f)
 	for scanner.Scan() {
 		line := scanner.Text()
@@ -81,7 +85,7 @@ func readIPList(filename string) *ipList {
 		if strings.Contains(line, "/") {
 			_, n, err := net.ParseCIDR(line)
 			if err != nil {
-				fmt.Printf("Unable to parse CIDR.\nLine:\n%s\nError:\n%s\n", line, err)
+				return nil, fmt.Errorf("Unable to parse CIDR.\nLine:\n%s\nError:\n%s\n", line, err)
 			}
 			if n != nil {
 				list.nets = append(list.nets, *n)
@@ -91,15 +95,18 @@ func readIPList(filename string) *ipList {
 			if ip != nil {
 				list.ips = append(list.ips, ip)
 			} else {
-				fmt.Printf("Unable to parse IP address in list: %s\n", line)
+				return nil, fmt.Errorf("Unable to parse IP address in list: %s\n", line)
 			}
 		}
 
 	}
-	return &list
+	return &list, nil
 }
 
 func (l *ipList) contains(checkIP *net.IP) bool {
+	if l == nil {
+		return false
+	}
 	for _, ip := range l.ips {
 		if ip.Equal(*checkIP) {
 			return true
@@ -114,51 +121,74 @@ func (l *ipList) contains(checkIP *net.IP) bool {
 	return false
 }
 
+var hits = make(map[string]*ratelimit.Bucket)
+
 func main() {
-	var hits map[string]*ratelimit.Bucket
-	hits = make(map[string]*ratelimit.Bucket)
+	app := cli.NewApp()
+	app.Name = "fastly-ratelimit"
 
-	channel := make(syslog.LogPartsChannel)
-	handler := syslog.NewChannelHandler(channel)
-
-	server := syslog.NewServer()
-	server.SetFormat(syslog.RFC3164)
-	server.SetHandler(handler)
-	if err := server.ListenUDP("0.0.0.0:514"); err != nil {
-		fmt.Println(err)
-		return
+	app.Flags = []cli.Flag{
+		cli.StringFlag{
+			Name:  "whitelist, w",
+			Usage: "Read `FILE` containing addresses which should whitelisted from any bans.",
+		},
+		cli.StringFlag{
+			Name:  "listen, l",
+			Usage: "Specify listen `ADDRESS:PORT`.",
+			Value: "0.0.0.0:514",
+		},
 	}
-	if err := server.Boot(); err != nil {
-		fmt.Println(err)
-		return
-	}
+	app.Action = func(c *cli.Context) error {
+		channel := make(syslog.LogPartsChannel)
+		handler := syslog.NewChannelHandler(channel)
 
-	whitelist := readIPList("/etc/haproxy-shared/whitelist-ips")
+		server := syslog.NewServer()
+		server.SetFormat(syslog.RFC3164)
+		server.SetHandler(handler)
+		if err := server.ListenUDP(c.GlobalString("listen")); err != nil {
+			return cli.NewExitError(fmt.Sprintf("Unable to listen: %s\n", err), -1)
+		}
+		if err := server.Boot(); err != nil {
+			return cli.NewExitError(fmt.Sprintf("Unable to start server: %s\n", err), -1)
+		}
 
-	go func(channel syslog.LogPartsChannel) {
-		for logParts := range channel {
-			var line string
-			var ok bool
-			if line, ok = logParts["content"].(string); !ok || line == "" {
-				continue
-			}
-			clientIP, cdnIP := getIPs(line)
-			if cdnIP == nil || clientIP == nil {
-				continue
-			}
-			if _, found := hits[cdnIP.String()]; !found {
-				hits[cdnIP.String()] = ratelimit.NewBucket(time.Duration(3)*time.Minute, 180)
-			}
-			_, isSoonerThanMaxWait := hits[cdnIP.String()].TakeMaxDuration(1, 0)
-			if !isSoonerThanMaxWait {
-				if whitelist.contains(cdnIP) {
-					//fmt.Println("but is whitelisted so we don't care.")
-				} else {
-					fmt.Printf("Over limit: %s\n", cdnIP.String())
-				}
+		var whitelist *ipList
+		var err error
+		whitelistFile := c.GlobalString("whitelist")
+		if whitelistFile != "" {
+			if whitelist, err = readIPList(whitelistFile); err != nil {
+				return cli.NewExitError(fmt.Sprintf("Error reading whitelist file: %s", err), -1)
 			}
 		}
-	}(channel)
 
-	server.Wait()
+		go func(channel syslog.LogPartsChannel) {
+			for logParts := range channel {
+				var line string
+				var ok bool
+				if line, ok = logParts["content"].(string); !ok || line == "" {
+					continue
+				}
+				clientIP, cdnIP := getIPs(line)
+				if cdnIP == nil || clientIP == nil {
+					continue
+				}
+				if _, found := hits[cdnIP.String()]; !found {
+					hits[cdnIP.String()] = ratelimit.NewBucket(time.Duration(3)*time.Minute, 180)
+				}
+				_, isSoonerThanMaxWait := hits[cdnIP.String()].TakeMaxDuration(1, 0)
+				if !isSoonerThanMaxWait {
+					if whitelist.contains(cdnIP) {
+						//fmt.Println("but is whitelisted so we don't care.")
+					} else {
+						fmt.Printf("Over limit: %s\n", cdnIP.String())
+					}
+				}
+			}
+		}(channel)
+
+		server.Wait()
+
+		return nil
+	}
+	app.Run(os.Args)
 }
