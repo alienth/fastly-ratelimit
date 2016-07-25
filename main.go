@@ -6,6 +6,7 @@ import (
 	"net"
 	"os"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/juju/ratelimit"
@@ -121,7 +122,43 @@ func (l *ipList) contains(checkIP *net.IP) bool {
 	return false
 }
 
-var hits = make(map[string]*ratelimit.Bucket)
+type ipRate struct {
+	ip     string
+	bucket *ratelimit.Bucket
+
+	lastHit int64
+	expire  int64
+}
+
+func (ipr *ipRate) New(ipString string) {
+	ipr.bucket = ratelimit.NewBucket(time.Duration(3)*time.Minute, 180)
+	ipr.expire = 900
+}
+
+// Records a hit and returns true if it is over limit.
+func (ipr *ipRate) Hit() bool {
+	_, isSoonerThanMaxWait := ipr.bucket.TakeMaxDuration(1, 0)
+	ipr.lastHit = time.Now().Unix()
+	return isSoonerThanMaxWait
+}
+
+type hitMap struct {
+	sync.RWMutex
+	m map[string]*ipRate
+}
+
+func expireRecords(hits *hitMap) {
+	for {
+		hits.Lock()
+		for ip, ipr := range hits.m {
+			if ipr.lastHit+ipr.expire < time.Now().Unix() {
+				delete(hits.m, ip)
+			}
+		}
+		hits.Unlock()
+		time.Sleep(time.Duration(60) * time.Second)
+	}
+}
 
 func main() {
 	app := cli.NewApp()
@@ -161,6 +198,8 @@ func main() {
 			}
 		}
 
+		var hits = hitMap{m: make(map[string]*ipRate)}
+		go expireRecords(&hits)
 		go func(channel syslog.LogPartsChannel) {
 			for logParts := range channel {
 				var line string
@@ -172,11 +211,17 @@ func main() {
 				if cdnIP == nil || clientIP == nil {
 					continue
 				}
-				if _, found := hits[cdnIP.String()]; !found {
-					hits[cdnIP.String()] = ratelimit.NewBucket(time.Duration(3)*time.Minute, 180)
+				var ipr *ipRate
+				var found bool
+				hits.Lock()
+				if ipr, found = hits.m[cdnIP.String()]; !found {
+					ipr = &ipRate{}
+					ipr.New(cdnIP.String())
+					hits.m[cdnIP.String()] = ipr
 				}
-				_, isSoonerThanMaxWait := hits[cdnIP.String()].TakeMaxDuration(1, 0)
-				if !isSoonerThanMaxWait {
+				hits.Unlock()
+				overLimit := ipr.Hit()
+				if !overLimit {
 					if whitelist.contains(cdnIP) {
 						//fmt.Println("but is whitelisted so we don't care.")
 					} else {
