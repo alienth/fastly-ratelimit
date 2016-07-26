@@ -9,6 +9,8 @@ import (
 	"sync"
 	"time"
 
+	"github.com/alienth/fastlyctl/util"
+	"github.com/alienth/go-fastly"
 	"github.com/juju/ratelimit"
 	"github.com/urfave/cli"
 	"gopkg.in/mcuadros/go-syslog.v2"
@@ -123,14 +125,19 @@ func (l *ipList) contains(checkIP *net.IP) bool {
 }
 
 type ipRate struct {
-	ip     string
+	ip     *net.IP
 	bucket *ratelimit.Bucket
 
-	lastHit int64
-	expire  int64
+	lastHit   int64
+	lastLimit int64
+	strikes   int
+	expire    int64
+	limitTime int64
+	entries   []*util.ACLEntry
 }
 
-func (ipr *ipRate) New(ipString string) {
+func (ipr *ipRate) New(ip *net.IP) {
+	ipr.ip = ip
 	ipr.bucket = ratelimit.NewBucket(time.Duration(3)*time.Minute, 180)
 	ipr.expire = 900
 }
@@ -140,6 +147,70 @@ func (ipr *ipRate) Hit() bool {
 	_, isSoonerThanMaxWait := ipr.bucket.TakeMaxDuration(1, 0)
 	ipr.lastHit = time.Now().Unix()
 	return isSoonerThanMaxWait
+}
+
+// Limit adds an IP to a fastly edge ACL
+func (ipr *ipRate) Limit() error {
+
+	// remove me
+	if time.Now().Unix()-ipr.lastLimit < 3600 {
+		return nil
+	}
+
+	service, err := util.GetServiceByNameOrID(client, "teststackoverflow.com")
+	if err != nil {
+		return err
+	}
+
+	acl, err := util.NewACL(client, service.ID, "ratelimit")
+	if err != nil {
+		return err
+	}
+
+	// TODO this is heavy.. cache? do we even need?(see below)
+	entries, err := acl.ListEntries()
+	if err != nil {
+		return err
+	}
+
+	// TODO This won't typically happen in normal conditions.. should we care?
+	for _, e := range entries {
+		if ipr.ip.String() == e.IP {
+			fmt.Printf("IP %s is already limited.\n", e.IP)
+			ipr.lastLimit = time.Now().Unix()
+			ipr.strikes += 1
+			ipr.limitTime = 300
+			entry := &util.ACLEntry{Client: client, ID: e.ID, ACLID: e.ACLID, ServiceID: service.ID}
+			ipr.entries = append(ipr.entries, entry)
+			return nil
+		}
+	}
+
+	fmt.Printf("Limiting IP %s\n", ipr.ip.String())
+	entry, err := util.NewACLEntry(client, service.ID, "ratelimit", ipr.ip.String(), 0, "fastly-ratelimit", false)
+	if err != nil {
+		return err
+	}
+	entry.Add()
+	ipr.lastLimit = time.Now().Unix()
+	ipr.strikes += 1
+	ipr.limitTime = 300
+	ipr.entries = append(ipr.entries, entry)
+	return nil
+}
+
+// Removes an IP from ratelimits
+func (ipr *ipRate) RemoveLimit() error {
+
+	if len(ipr.entries) > 0 {
+		fmt.Printf("Unlimiting IP %s\n", ipr.ip.String())
+		for i, entry := range ipr.entries {
+			entry.Remove()
+			ipr.entries[i] = nil
+		}
+		ipr.entries = ipr.entries[:0]
+	}
+	return nil
 }
 
 type hitMap struct {
@@ -160,6 +231,21 @@ func expireRecords(hits *hitMap) {
 	}
 }
 
+func expireLimits(hits *hitMap) {
+	for {
+		hits.Lock()
+		for _, ipr := range hits.m {
+			if ipr.lastLimit+ipr.limitTime > time.Now().Unix() {
+				ipr.RemoveLimit()
+			}
+		}
+		hits.Unlock()
+		time.Sleep(time.Duration(15) * time.Second)
+	}
+}
+
+var client *fastly.Client
+
 func main() {
 	app := cli.NewApp()
 	app.Name = "fastly-ratelimit"
@@ -174,8 +260,15 @@ func main() {
 			Usage: "Specify listen `ADDRESS:PORT`.",
 			Value: "0.0.0.0:514",
 		},
+		cli.StringFlag{
+			Name:   "fastly-key, K",
+			Usage:  "Fastly API Key. Can be read from 'fastly_key' file in CWD.",
+			EnvVar: "FASTLY_KEY",
+			Value:  util.GetFastlyKey(),
+		},
 	}
 	app.Action = func(c *cli.Context) error {
+		client, _ = fastly.NewClient(c.GlobalString("fastly-key"))
 		channel := make(syslog.LogPartsChannel)
 		handler := syslog.NewChannelHandler(channel)
 
@@ -200,6 +293,7 @@ func main() {
 
 		var hits = hitMap{m: make(map[string]*ipRate)}
 		go expireRecords(&hits)
+		go expireLimits(&hits)
 		go func(channel syslog.LogPartsChannel) {
 			for logParts := range channel {
 				var line string
@@ -216,7 +310,7 @@ func main() {
 				hits.Lock()
 				if ipr, found = hits.m[cdnIP.String()]; !found {
 					ipr = &ipRate{}
-					ipr.New(cdnIP.String())
+					ipr.New(cdnIP)
 					hits.m[cdnIP.String()] = ipr
 				}
 				hits.Unlock()
@@ -225,7 +319,9 @@ func main() {
 					if whitelist.contains(cdnIP) {
 						//fmt.Println("but is whitelisted so we don't care.")
 					} else {
-						fmt.Printf("Over limit: %s\n", cdnIP.String())
+						if err := ipr.Limit(); err != nil {
+							fmt.Printf("Error limiting IP: %s", err)
+						}
 					}
 				}
 			}
