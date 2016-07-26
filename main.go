@@ -147,22 +147,24 @@ func (ipr *ipRate) New(ip *net.IP) {
 
 // Records a hit and returns true if it is over limit.
 func (ipr *ipRate) Hit() bool {
+	// Here we pretend that the IP performed no hits before the limit was removed,
+	// since in testing the IP is not actually limited.
+	if ipr.LastLimit != 0 && time.Now().Sub(time.Unix(ipr.LastLimit, 0)) < time.Duration(1)*time.Hour {
+		return false
+	}
+
 	_, isSoonerThanMaxWait := ipr.bucket.TakeMaxDuration(1, 0)
 	if ipr.FirstHit == 0 {
 		ipr.FirstHit = time.Now().Unix()
 	}
 	ipr.LastHit = time.Now().Unix()
+	ipr.Hits += 1
 	ipr.Expire = time.Now().Add(time.Duration(1) * time.Hour).Unix()
-	return isSoonerThanMaxWait
+	return !isSoonerThanMaxWait
 }
 
 // Limit adds an IP to a fastly edge ACL
 func (ipr *ipRate) Limit() error {
-
-	// remove me
-	if time.Now().Unix()-ipr.LastLimit < 3600 {
-		return nil
-	}
 
 	service, err := util.GetServiceByNameOrID(client, "teststackoverflow.com")
 	if err != nil {
@@ -185,9 +187,12 @@ func (ipr *ipRate) Limit() error {
 	for _, e := range entries {
 		if ipr.ip.String() == e.IP {
 			fmt.Printf("IP %s is already limited.\n", e.IP)
-			json.Unmarshal([]byte(e.Comment), ipr)
+			// Not all ACL entries were necessarily created by this script, so silently ignore unmarshal errors.
+			if err := json.Unmarshal([]byte(e.Comment), ipr); err != nil {
+				break
+			}
 			entry = &util.ACLEntry{Client: client, ID: e.ID, ACLID: e.ACLID, ServiceID: service.ID}
-			continue
+			break
 		}
 	}
 
@@ -330,7 +335,7 @@ func main() {
 				}
 				hits.Unlock()
 				overLimit := ipr.Hit()
-				if !overLimit {
+				if overLimit {
 					if whitelist.contains(cdnIP) {
 						//fmt.Println("but is whitelisted so we don't care.")
 					} else {
