@@ -2,6 +2,7 @@ package main
 
 import (
 	"bufio"
+	"encoding/json"
 	"fmt"
 	"net"
 	"os"
@@ -125,27 +126,33 @@ func (l *ipList) contains(checkIP *net.IP) bool {
 }
 
 type ipRate struct {
-	ip     *net.IP
-	bucket *ratelimit.Bucket
+	ip      *net.IP
+	bucket  *ratelimit.Bucket
+	entries []*util.ACLEntry
 
-	lastHit   int64
-	lastLimit int64
-	strikes   int
-	expire    int64
-	limitTime int64
-	entries   []*util.ACLEntry
+	FirstHit    int64 `json:"first_hit,omitempty"`
+	LastHit     int64 `json:"last_hit,omitempty"`
+	LastLimit   int64 `json:"last_limit,omitempty"`
+	Hits        int   `json:"hits,omitempty"`
+	Strikes     int   `json:"strikes,omitempty"`
+	Expire      int64 `json:"-"`
+	LimitExpire int64 `json:"limit_expire,omitempty"`
 }
 
 func (ipr *ipRate) New(ip *net.IP) {
 	ipr.ip = ip
 	ipr.bucket = ratelimit.NewBucket(time.Duration(3)*time.Minute, 180)
-	ipr.expire = 900
+	ipr.Expire = time.Now().Add(time.Duration(1) * time.Hour).Unix()
 }
 
 // Records a hit and returns true if it is over limit.
 func (ipr *ipRate) Hit() bool {
 	_, isSoonerThanMaxWait := ipr.bucket.TakeMaxDuration(1, 0)
-	ipr.lastHit = time.Now().Unix()
+	if ipr.FirstHit == 0 {
+		ipr.FirstHit = time.Now().Unix()
+	}
+	ipr.LastHit = time.Now().Unix()
+	ipr.Expire = time.Now().Add(time.Duration(1) * time.Hour).Unix()
 	return isSoonerThanMaxWait
 }
 
@@ -153,7 +160,7 @@ func (ipr *ipRate) Hit() bool {
 func (ipr *ipRate) Limit() error {
 
 	// remove me
-	if time.Now().Unix()-ipr.lastLimit < 3600 {
+	if time.Now().Unix()-ipr.LastLimit < 3600 {
 		return nil
 	}
 
@@ -177,31 +184,41 @@ func (ipr *ipRate) Limit() error {
 	for _, e := range entries {
 		if ipr.ip.String() == e.IP {
 			fmt.Printf("IP %s is already limited.\n", e.IP)
-			ipr.lastLimit = time.Now().Unix()
-			ipr.strikes += 1
-			ipr.limitTime = 300
-			entry := &util.ACLEntry{Client: client, ID: e.ID, ACLID: e.ACLID, ServiceID: service.ID}
+			json.Unmarshal([]byte(e.Comment), ipr)
+			ipr.LastLimit = time.Now().Unix()
+			ipr.Strikes += 1
+			ipr.Expire = time.Now().Add(time.Duration(24) * time.Hour).Unix()
+			comment, err := json.Marshal(ipr)
+			if err != nil {
+				return err
+			}
+			entry := &util.ACLEntry{Client: client, ID: e.ID, ACLID: e.ACLID, ServiceID: service.ID, Comment: string(comment)}
 			ipr.entries = append(ipr.entries, entry)
+			// TODO: Update the entry?
 			return nil
 		}
 	}
 
 	fmt.Printf("Limiting IP %s\n", ipr.ip.String())
-	entry, err := util.NewACLEntry(client, service.ID, "ratelimit", ipr.ip.String(), 0, "fastly-ratelimit", false)
+	ipr.LastLimit = time.Now().Unix()
+	ipr.Strikes += 1
+	ipr.LimitExpire = time.Now().Add(time.Duration(5) * time.Minute).Unix()
+	ipr.Expire = time.Now().Add(time.Duration(24) * time.Hour).Unix()
+	comment, err := json.Marshal(ipr)
+	if err != nil {
+		return err
+	}
+	entry, err := util.NewACLEntry(client, service.ID, "ratelimit", ipr.ip.String(), 0, string(comment), false)
 	if err != nil {
 		return err
 	}
 	entry.Add()
-	ipr.lastLimit = time.Now().Unix()
-	ipr.strikes += 1
-	ipr.limitTime = 300
 	ipr.entries = append(ipr.entries, entry)
 	return nil
 }
 
 // Removes an IP from ratelimits
 func (ipr *ipRate) RemoveLimit() error {
-
 	if len(ipr.entries) > 0 {
 		fmt.Printf("Unlimiting IP %s\n", ipr.ip.String())
 		for i, entry := range ipr.entries {
@@ -222,7 +239,8 @@ func expireRecords(hits *hitMap) {
 	for {
 		hits.Lock()
 		for ip, ipr := range hits.m {
-			if ipr.lastHit+ipr.expire < time.Now().Unix() {
+			if ipr.Expire < time.Now().Unix() {
+				ipr.RemoveLimit()
 				delete(hits.m, ip)
 			}
 		}
@@ -235,7 +253,7 @@ func expireLimits(hits *hitMap) {
 	for {
 		hits.Lock()
 		for _, ipr := range hits.m {
-			if ipr.lastLimit+ipr.limitTime > time.Now().Unix() {
+			if ipr.LimitExpire < time.Now().Unix() {
 				ipr.RemoveLimit()
 			}
 		}
