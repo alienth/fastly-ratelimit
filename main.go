@@ -180,26 +180,17 @@ func (ipr *ipRate) Limit() error {
 		return err
 	}
 
-	// TODO This won't typically happen in normal conditions.. should we care?
+	var entry *util.ACLEntry
+
 	for _, e := range entries {
 		if ipr.ip.String() == e.IP {
 			fmt.Printf("IP %s is already limited.\n", e.IP)
 			json.Unmarshal([]byte(e.Comment), ipr)
-			ipr.LastLimit = time.Now().Unix()
-			ipr.Strikes += 1
-			ipr.Expire = time.Now().Add(time.Duration(24) * time.Hour).Unix()
-			comment, err := json.Marshal(ipr)
-			if err != nil {
-				return err
-			}
-			entry := &util.ACLEntry{Client: client, ID: e.ID, ACLID: e.ACLID, ServiceID: service.ID, Comment: string(comment)}
-			ipr.entries = append(ipr.entries, entry)
-			// TODO: Update the entry?
-			return nil
+			entry = &util.ACLEntry{Client: client, ID: e.ID, ACLID: e.ACLID, ServiceID: service.ID}
+			continue
 		}
 	}
 
-	fmt.Printf("Limiting IP %s\n", ipr.ip.String())
 	ipr.LastLimit = time.Now().Unix()
 	ipr.Strikes += 1
 	ipr.LimitExpire = time.Now().Add(time.Duration(5) * time.Minute).Unix()
@@ -208,11 +199,17 @@ func (ipr *ipRate) Limit() error {
 	if err != nil {
 		return err
 	}
-	entry, err := util.NewACLEntry(client, service.ID, "ratelimit", ipr.ip.String(), 0, string(comment), false)
-	if err != nil {
-		return err
+	if entry == nil {
+		entry, err := util.NewACLEntry(client, service.ID, "ratelimit", ipr.ip.String(), 0, string(comment), false)
+		if err != nil {
+			return err
+		}
+		entry.Add()
+	} else {
+		entry.Comment = string(comment)
+		//		entry.Update()
 	}
-	entry.Add()
+
 	ipr.entries = append(ipr.entries, entry)
 	return nil
 }
