@@ -158,7 +158,7 @@ func (ipr *ipRate) Hit() bool {
 		ipr.FirstHit = time.Now().Unix()
 	}
 	ipr.LastHit = time.Now().Unix()
-	ipr.Hits += 1
+	ipr.Hits++
 	ipr.Expire = time.Now().Add(time.Duration(1) * time.Hour).Unix()
 	return !isSoonerThanMaxWait
 }
@@ -197,7 +197,7 @@ func (ipr *ipRate) Limit() error {
 	}
 
 	ipr.LastLimit = time.Now().Unix()
-	ipr.Strikes += 1
+	ipr.Strikes++
 	ipr.LimitExpire = time.Now().Add(time.Duration(5) * time.Minute).Unix()
 	ipr.Expire = time.Now().Add(time.Duration(24) * time.Hour).Unix()
 	comment, err := json.Marshal(ipr)
@@ -224,7 +224,9 @@ func (ipr *ipRate) RemoveLimit() error {
 	if len(ipr.entries) > 0 {
 		fmt.Printf("Unlimiting IP %s\n", ipr.ip.String())
 		for i, entry := range ipr.entries {
-			entry.Remove()
+			if err := entry.Remove(); err != nil {
+				fmt.Println(err)
+			}
 			ipr.entries[i] = nil
 		}
 		ipr.entries = ipr.entries[:0]
