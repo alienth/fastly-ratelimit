@@ -239,7 +239,7 @@ type hitMap struct {
 	m map[string]*ipRate
 }
 
-func expireRecords(hits *hitMap) {
+func (hits *hitMap) expireRecords() {
 	for {
 		hits.Lock()
 		for ip, ipr := range hits.m {
@@ -253,7 +253,7 @@ func expireRecords(hits *hitMap) {
 	}
 }
 
-func expireLimits(hits *hitMap) {
+func (hits *hitMap) expireLimits() {
 	for {
 		hits.Lock()
 		for _, ipr := range hits.m {
@@ -264,6 +264,48 @@ func expireLimits(hits *hitMap) {
 		hits.Unlock()
 		time.Sleep(time.Duration(15) * time.Second)
 	}
+}
+
+// Fetches down remote ACLs and populates local hitMap with previously stored data.
+func (hits *hitMap) importIPRates() error {
+	service, err := util.GetServiceByNameOrID(client, "teststackoverflow.com")
+	if err != nil {
+		return err
+	}
+
+	acl, err := util.NewACL(client, service.ID, "ratelimit")
+	if err != nil {
+		return err
+	}
+
+	entries, err := acl.ListEntries()
+	if err != nil {
+		return err
+	}
+
+	// TODO: work with IPs existing in multiple services.
+	for _, e := range entries {
+		var ipr *ipRate
+		var found bool
+		hits.Lock()
+		if ipr, found = hits.m[e.IP]; !found {
+			ipr = &ipRate{}
+			ip := net.ParseIP(e.IP)
+			if ip == nil {
+				return fmt.Errorf("Unable to parse IP %s in ACL.")
+			}
+			ipr.New(&ip)
+			hits.m[ip.String()] = ipr
+		}
+		hits.Unlock()
+		if err := json.Unmarshal([]byte(e.Comment), ipr); err != nil {
+			break
+		}
+		entry := &util.ACLEntry{Client: client, ID: e.ID, ACLID: e.ACLID, ServiceID: service.ID}
+		ipr.entries = append(ipr.entries, entry)
+	}
+
+	return nil
 }
 
 var client *fastly.Client
@@ -314,8 +356,11 @@ func main() {
 		}
 
 		var hits = hitMap{m: make(map[string]*ipRate)}
-		go expireRecords(&hits)
-		go expireLimits(&hits)
+		if err := hits.importIPRates(); err != nil {
+			return cli.NewExitError(fmt.Sprintf("Error importing existing IP rates: %s", err), -1)
+		}
+		go hits.expireRecords()
+		go hits.expireLimits()
 		go func(channel syslog.LogPartsChannel) {
 			for logParts := range channel {
 				var line string
