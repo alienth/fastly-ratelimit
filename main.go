@@ -205,7 +205,7 @@ func (ipr *ipRate) Limit() error {
 		return err
 	}
 	if entry == nil {
-		entry, err := util.NewACLEntry(client, service.ID, "ratelimit", ipr.ip.String(), 0, string(comment), false)
+		entry, err = util.NewACLEntry(client, service.ID, "ratelimit", ipr.ip.String(), 0, string(comment), false)
 		if err != nil {
 			return err
 		}
