@@ -265,7 +265,6 @@ func (hits *hitMap) expireLimits() {
 		hits.Lock()
 		for _, ipr := range hits.m {
 			if ipr.LimitExpire < time.Now().Unix() {
-				ipr.RemoveLimit()
 				if err := ipr.RemoveLimit(); err != nil {
 					fmt.Println(err)
 				}
