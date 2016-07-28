@@ -1,15 +1,16 @@
 package main
 
 import (
-	"bufio"
 	"encoding/json"
 	"fmt"
+	"io/ioutil"
 	"net"
 	"os"
 	"strings"
 	"sync"
 	"time"
 
+	"github.com/BurntSushi/toml"
 	"github.com/alienth/fastlyctl/util"
 	"github.com/alienth/go-fastly"
 	"github.com/juju/ratelimit"
@@ -66,57 +67,69 @@ func getLogTimestamp(logLine string) int64 {
 	return (ts.Unix())
 }
 
-type ipList struct {
-	ips  []net.IP
-	nets []net.IPNet
+type IPList struct {
+	IPs  []net.IP
+	Nets []IPNet
+
+	Limit    bool
+	Requests int
+	Time     int
 }
 
-func readIPList(filename string) (*ipList, error) {
-	var list ipList
-	f, err := os.Open(filename)
+//type IP net.IP
+//type IPNet net.IPNet
+//
+//var ipLists map[string]IPList
+//
+//func (ip *IP) UnmarshalTOML(b []byte) error {
+//	ipAddr := net.ParseIP(string(b))
+//	if ipAddr != nil {
+//		return fmt.Errorf("Unable to unmarshal %s to IP.", string(b))
+//	}
+//
+//	ipAddr.UnmarshalText()
+//
+//}
+
+type IPNet struct {
+	net.IPNet
+}
+
+func (ipNet *IPNet) UnmarshalTOML(b []byte) error {
+	_, n, err := net.ParseCIDR(string(b))
+	if err != nil {
+		return fmt.Errorf("Unable to parse CIDR.\nEntry:\n%s\nError:\n%s\n", string(b), err)
+	}
+	ipNet.IP = n.IP
+	ipNet.Mask = n.Mask
+
+	return nil
+}
+
+func readConfig(filename string) (map[string]*IPList, error) {
+	ipLists := make(map[string]*IPList)
+	body, err := ioutil.ReadFile(filename)
 	if err != nil {
 		return nil, err
 	}
-	scanner := bufio.NewScanner(f)
-	for scanner.Scan() {
-		line := scanner.Text()
-		if strings.Index(strings.TrimSpace(line), "#") == 0 {
-			continue
-		}
-		if strings.TrimSpace(line) == "" {
-			continue
-		}
-		if strings.Contains(line, "/") {
-			_, n, err := net.ParseCIDR(line)
-			if err != nil {
-				return nil, fmt.Errorf("Unable to parse CIDR.\nLine:\n%s\nError:\n%s\n", line, err)
-			}
-			if n != nil {
-				list.nets = append(list.nets, *n)
-			}
-		} else {
-			ip := net.ParseIP(line)
-			if ip != nil {
-				list.ips = append(list.ips, ip)
-			} else {
-				return nil, fmt.Errorf("Unable to parse IP address in list: %s\n", line)
-			}
-		}
 
+	if err := toml.Unmarshal(body, &ipLists); err != nil {
+		return nil, fmt.Errorf("toml parsing error: %s", err)
 	}
-	return &list, nil
+
+	return ipLists, nil
 }
 
-func (l *ipList) contains(checkIP *net.IP) bool {
+func (l *IPList) contains(checkIP *net.IP) bool {
 	if l == nil {
 		return false
 	}
-	for _, ip := range l.ips {
+	for _, ip := range l.IPs {
 		if ip.Equal(*checkIP) {
 			return true
 		}
 	}
-	for _, net := range l.nets {
+	for _, net := range l.Nets {
 		if net.Contains(*checkIP) {
 			return true
 		}
@@ -199,7 +212,7 @@ func (ipr *ipRate) Limit() error {
 
 	ipr.LastLimit = time.Now().Unix()
 	ipr.Strikes++
-	ipr.LimitExpire = time.Now().Add(time.Duration(5) * time.Minute).Unix()
+	ipr.LimitExpire = time.Now().Add(time.Duration(45) * time.Minute).Unix()
 	ipr.Expire = time.Now().Add(time.Duration(24) * time.Hour).Unix()
 	comment, err := json.Marshal(ipr)
 	if err != nil {
@@ -346,6 +359,11 @@ func main() {
 		channel := make(syslog.LogPartsChannel)
 		handler := syslog.NewChannelHandler(channel)
 
+		ipLists, err := readConfig("config.toml")
+		if err != nil {
+			return cli.NewExitError(fmt.Sprintf("Error reading config file:\n%s\n", err), -1)
+		}
+
 		server := syslog.NewServer()
 		server.SetFormat(syslog.RFC3164)
 		server.SetHandler(handler)
@@ -354,15 +372,6 @@ func main() {
 		}
 		if err := server.Boot(); err != nil {
 			return cli.NewExitError(fmt.Sprintf("Unable to start server: %s\n", err), -1)
-		}
-
-		var whitelist *ipList
-		var err error
-		whitelistFile := c.GlobalString("whitelist")
-		if whitelistFile != "" {
-			if whitelist, err = readIPList(whitelistFile); err != nil {
-				return cli.NewExitError(fmt.Sprintf("Error reading whitelist file: %s", err), -1)
-			}
 		}
 
 		var hits = hitMap{m: make(map[string]*ipRate)}
@@ -393,7 +402,7 @@ func main() {
 				hits.Unlock()
 				overLimit := ipr.Hit()
 				if overLimit {
-					if whitelist.contains(cdnIP) {
+					if ipLists["_default_"].contains(cdnIP) {
 						//fmt.Println("but is whitelisted so we don't care.")
 					} else {
 						if err := ipr.Limit(); err != nil {
