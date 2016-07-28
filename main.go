@@ -228,7 +228,7 @@ func (ipr *ipRate) RemoveLimit() error {
 		fmt.Printf("Unlimiting IP %s\n", ipr.ip.String())
 		for i, entry := range ipr.entries {
 			if err := entry.Remove(); err != nil {
-				fmt.Println(err)
+				return fmt.Errorf("Error removing limit for IP %s: %s", ipr.ip.String(), err)
 			}
 			ipr.entries[i] = nil
 		}
@@ -248,8 +248,11 @@ func (hits *hitMap) expireRecords() {
 		hits.Lock()
 		for ip, ipr := range hits.m {
 			if ipr.Expire < time.Now().Unix() {
-				ipr.RemoveLimit()
-				delete(hits.m, ip)
+				if err := ipr.RemoveLimit(); err != nil {
+					fmt.Println(err)
+				} else {
+					delete(hits.m, ip)
+				}
 			}
 		}
 		hits.Unlock()
@@ -263,6 +266,9 @@ func (hits *hitMap) expireLimits() {
 		for _, ipr := range hits.m {
 			if ipr.LimitExpire < time.Now().Unix() {
 				ipr.RemoveLimit()
+				if err := ipr.RemoveLimit(); err != nil {
+					fmt.Println(err)
+				}
 			}
 		}
 		hits.Unlock()
