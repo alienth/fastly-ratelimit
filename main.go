@@ -129,6 +129,7 @@ type ipRate struct {
 	ip      *net.IP
 	bucket  *ratelimit.Bucket
 	entries []*util.ACLEntry
+	limited bool
 
 	FirstHit    int64 `json:"first_hit,omitempty"`
 	LastHit     int64 `json:"last_hit,omitempty"`
@@ -149,7 +150,7 @@ func (ipr *ipRate) New(ip *net.IP) {
 func (ipr *ipRate) Hit() bool {
 	// Here we pretend that the IP performed no hits before the limit was removed,
 	// since in testing the IP is not actually limited.
-	if ipr.LastLimit != 0 && time.Now().Sub(time.Unix(ipr.LastLimit, 0)) < time.Duration(1)*time.Hour {
+	if ipr.limited {
 		return false
 	}
 
@@ -209,12 +210,14 @@ func (ipr *ipRate) Limit() error {
 		if err != nil {
 			return err
 		}
+		fmt.Printf("Limiting IP %s\n", ipr.ip.String())
 		entry.Add()
 	} else {
 		entry.Comment = string(comment)
 		//		entry.Update()
 	}
 
+	ipr.limited = true
 	ipr.entries = append(ipr.entries, entry)
 	return nil
 }
@@ -230,6 +233,7 @@ func (ipr *ipRate) RemoveLimit() error {
 			ipr.entries[i] = nil
 		}
 		ipr.entries = ipr.entries[:0]
+		ipr.limited = false
 	}
 	return nil
 }
@@ -302,6 +306,7 @@ func (hits *hitMap) importIPRates() error {
 			break
 		}
 		entry := &util.ACLEntry{Client: client, ID: e.ID, ACLID: e.ACLID, ServiceID: service.ID}
+		ipr.limited = true
 		ipr.entries = append(ipr.entries, entry)
 	}
 
