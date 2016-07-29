@@ -290,7 +290,9 @@ func (ipr *ipRate) Limit() error {
 			return err
 		}
 		fmt.Printf("Limiting IP %s\n", ipr.ip.String())
-		entry.Add()
+		if err = entry.Add(); err != nil {
+			return err
+		}
 	} else {
 		entry.Comment = string(comment)
 		//		entry.Update()
