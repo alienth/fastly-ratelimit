@@ -4,7 +4,6 @@ import (
 	"bufio"
 	"encoding/json"
 	"fmt"
-	"io/ioutil"
 	"net"
 	"os"
 	"strings"
@@ -68,55 +67,45 @@ func getLogTimestamp(logLine string) int64 {
 	return (ts.Unix())
 }
 
-type Duration struct {
-	Duration time.Duration
+type duration struct {
+	time.Duration
 }
 
-func (d *Duration) UnmarshalTOML(b []byte) error {
-	var err error
-	if d.Duration, err = time.ParseDuration(string(b)); err != nil {
-		return err
-	}
-	return nil
-}
-
-type IPList struct {
-	IPs  []net.IP
-	Nets []IPNet
-
-	Time        Duration
-	Expire      Duration
-	LimitExpire Duration
-	Limit       bool
-	Requests    int64
-	ListFile    string
-}
-
-type IPNet struct {
+type ipNet struct {
 	net.IPNet
 }
 
-func (n *IPNet) UnmarshalTOML(b []byte) error {
-	_, parsedNet, err := net.ParseCIDR(string(b))
-	if err != nil {
-		return fmt.Errorf("Unable to parse CIDR.\nEntry:\n%s\nError:\n%s\n", string(b), err)
-	}
-	n.IP = parsedNet.IP
-	n.Mask = parsedNet.Mask
+type IPList struct {
+	IPs  []*net.IP
+	Nets []*ipNet
 
-	return nil
+	Limit    bool
+	Requests int64
+	ListFile string
+
+	Time        duration
+	Expire      duration
+	LimitExpire duration
+}
+
+func (d *duration) UnmarshalText(b []byte) error {
+	var err error
+	d.Duration, err = time.ParseDuration(string(b))
+	return err
+}
+
+func (n *ipNet) UnmarshalText(b []byte) error {
+	_, network, err := net.ParseCIDR(string(b))
+	n.IPNet = *network
+	return err
 }
 
 type IPLists map[string]*IPList
 
 func readConfig(filename string) (IPLists, error) {
 	ipLists := make(IPLists)
-	body, err := ioutil.ReadFile(filename)
-	if err != nil {
-		return nil, err
-	}
 
-	if err := toml.Unmarshal(body, &ipLists); err != nil {
+	if _, err := toml.DecodeFile(filename, &ipLists); err != nil {
 		return nil, fmt.Errorf("toml parsing error: %s", err)
 	}
 
@@ -171,15 +160,15 @@ func (l *IPList) readListFile() error {
 				return fmt.Errorf("Unable to parse CIDR.\nLine:\n%s\nError:\n%s\n", line, err)
 			}
 			if parsedNet != nil {
-				var n IPNet
+				var n ipNet
 				n.IP = parsedNet.IP
 				n.Mask = parsedNet.Mask
-				l.Nets = append(l.Nets, n)
+				l.Nets = append(l.Nets, &n)
 			}
 		} else {
 			ip := net.ParseIP(line)
 			if ip != nil {
-				l.IPs = append(l.IPs, ip)
+				l.IPs = append(l.IPs, &ip)
 			} else {
 				return fmt.Errorf("Unable to parse IP address in list: %s\n", line)
 			}
