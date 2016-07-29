@@ -216,12 +216,6 @@ type ipRate struct {
 	LimitExpire int64 `json:"limit_expire,omitempty"`
 }
 
-func (ipr *ipRate) New(ip *net.IP) {
-	ipr.ip = ip
-	ipr.bucket = ratelimit.NewBucket(time.Duration(3)*time.Minute, 180)
-	ipr.Expire = time.Now().Add(time.Duration(1) * time.Hour).Unix()
-}
-
 // Records a hit and returns true if it is over limit.
 func (ipr *ipRate) Hit() bool {
 	// Here we pretend that the IP performed no hits before the limit was removed,
@@ -379,12 +373,11 @@ func (hits *hitMap) importIPRates() error {
 		var found bool
 		hits.Lock()
 		if ipr, found = hits.m[e.IP]; !found {
-			ipr = &ipRate{}
 			ip := net.ParseIP(e.IP)
+			ipr = ipLists.getRate(&ip)
 			if ip == nil {
 				return fmt.Errorf("Unable to parse IP %s in ACL.")
 			}
-			ipr.New(&ip)
 			hits.m[ip.String()] = ipr
 		}
 		hits.Unlock()
@@ -400,6 +393,7 @@ func (hits *hitMap) importIPRates() error {
 }
 
 var client *fastly.Client
+var ipLists IPLists
 
 func main() {
 	app := cli.NewApp()
@@ -427,8 +421,8 @@ func main() {
 		channel := make(syslog.LogPartsChannel)
 		handler := syslog.NewChannelHandler(channel)
 
-		ipLists, err := readConfig("config.toml")
-		if err != nil {
+		var err error
+		if ipLists, err = readConfig("config.toml"); err != nil {
 			return cli.NewExitError(fmt.Sprintf("Error reading config file:\n%s\n", err), -1)
 		}
 
