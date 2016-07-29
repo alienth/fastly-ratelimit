@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bufio"
 	"encoding/json"
 	"fmt"
 	"io/ioutil"
@@ -67,47 +68,49 @@ func getLogTimestamp(logLine string) int64 {
 	return (ts.Unix())
 }
 
+type Duration struct {
+	Duration time.Duration
+}
+
+func (d *Duration) UnmarshalTOML(b []byte) error {
+	var err error
+	if d.Duration, err = time.ParseDuration(string(b)); err != nil {
+		return err
+	}
+	return nil
+}
+
 type IPList struct {
 	IPs  []net.IP
 	Nets []IPNet
 
-	Limit    bool
-	Requests int
-	Time     int
+	Time        Duration
+	Expire      Duration
+	LimitExpire Duration
+	Limit       bool
+	Requests    int64
+	ListFile    string
 }
-
-//type IP net.IP
-//type IPNet net.IPNet
-//
-//var ipLists map[string]IPList
-//
-//func (ip *IP) UnmarshalTOML(b []byte) error {
-//	ipAddr := net.ParseIP(string(b))
-//	if ipAddr != nil {
-//		return fmt.Errorf("Unable to unmarshal %s to IP.", string(b))
-//	}
-//
-//	ipAddr.UnmarshalText()
-//
-//}
 
 type IPNet struct {
 	net.IPNet
 }
 
-func (ipNet *IPNet) UnmarshalTOML(b []byte) error {
-	_, n, err := net.ParseCIDR(string(b))
+func (n *IPNet) UnmarshalTOML(b []byte) error {
+	_, parsedNet, err := net.ParseCIDR(string(b))
 	if err != nil {
 		return fmt.Errorf("Unable to parse CIDR.\nEntry:\n%s\nError:\n%s\n", string(b), err)
 	}
-	ipNet.IP = n.IP
-	ipNet.Mask = n.Mask
+	n.IP = parsedNet.IP
+	n.Mask = parsedNet.Mask
 
 	return nil
 }
 
-func readConfig(filename string) (map[string]*IPList, error) {
-	ipLists := make(map[string]*IPList)
+type IPLists map[string]*IPList
+
+func readConfig(filename string) (IPLists, error) {
+	ipLists := make(IPLists)
 	body, err := ioutil.ReadFile(filename)
 	if err != nil {
 		return nil, err
@@ -115,6 +118,12 @@ func readConfig(filename string) (map[string]*IPList, error) {
 
 	if err := toml.Unmarshal(body, &ipLists); err != nil {
 		return nil, fmt.Errorf("toml parsing error: %s", err)
+	}
+
+	for _, list := range ipLists {
+		if list.ListFile != "" {
+			list.readListFile()
+		}
 	}
 
 	return ipLists, nil
@@ -138,11 +147,76 @@ func (l *IPList) contains(checkIP *net.IP) bool {
 	return false
 }
 
+// readListFile reads a ListFile and parses the content
+// into the IPLists' IPs and Nets fields.
+func (l *IPList) readListFile() error {
+	f, err := os.Open(l.ListFile)
+	if err != nil {
+		return err
+	}
+
+	scanner := bufio.NewScanner(f)
+
+	for scanner.Scan() {
+		line := scanner.Text()
+		if strings.Index(strings.TrimSpace(line), "#") == 0 {
+			continue
+		}
+		if strings.TrimSpace(line) == "" {
+			continue
+		}
+		if strings.Contains(line, "/") {
+			_, parsedNet, err := net.ParseCIDR(line)
+			if err != nil {
+				return fmt.Errorf("Unable to parse CIDR.\nLine:\n%s\nError:\n%s\n", line, err)
+			}
+			if parsedNet != nil {
+				var n IPNet
+				n.IP = parsedNet.IP
+				n.Mask = parsedNet.Mask
+				l.Nets = append(l.Nets, n)
+			}
+		} else {
+			ip := net.ParseIP(line)
+			if ip != nil {
+				l.IPs = append(l.IPs, ip)
+			} else {
+				return fmt.Errorf("Unable to parse IP address in list: %s\n", line)
+			}
+		}
+	}
+
+	return nil
+}
+
+func (lists IPLists) getRate(ip *net.IP) *ipRate {
+	var ipr ipRate
+	for _, list := range lists {
+		if list.contains(ip) {
+			ipr.bucket = ratelimit.NewBucket(list.Time.Duration, list.Requests)
+			ipr.Expire = time.Now().Add(list.Expire.Duration).Unix()
+			ipr.LimitExpire = time.Now().Add(list.LimitExpire.Duration).Unix()
+			ipr.ip = ip
+			ipr.shouldLimit = list.Limit
+			return &ipr
+		}
+	}
+
+	list := lists["_default_"]
+	ipr.bucket = ratelimit.NewBucket(list.Time.Duration, list.Requests)
+	ipr.Expire = time.Now().Add(list.Expire.Duration).Unix()
+	ipr.LimitExpire = time.Now().Add(list.LimitExpire.Duration).Unix()
+	ipr.ip = ip
+	ipr.shouldLimit = list.Limit
+	return &ipr
+}
+
 type ipRate struct {
-	ip      *net.IP
-	bucket  *ratelimit.Bucket
-	entries []*util.ACLEntry
-	limited bool
+	ip          *net.IP
+	bucket      *ratelimit.Bucket
+	entries     []*util.ACLEntry
+	limited     bool
+	shouldLimit bool
 
 	FirstHit    int64 `json:"first_hit,omitempty"`
 	LastHit     int64 `json:"last_hit,omitempty"`
@@ -179,6 +253,9 @@ func (ipr *ipRate) Hit() bool {
 
 // Limit adds an IP to a fastly edge ACL
 func (ipr *ipRate) Limit() error {
+	if !ipr.shouldLimit {
+		return nil
+	}
 
 	service, err := util.GetServiceByNameOrID(client, "teststackoverflow.com")
 	if err != nil {
@@ -395,19 +472,18 @@ func main() {
 				var found bool
 				hits.Lock()
 				if ipr, found = hits.m[cdnIP.String()]; !found {
-					ipr = &ipRate{}
-					ipr.New(cdnIP)
+					ipr = ipLists.getRate(cdnIP)
 					hits.m[cdnIP.String()] = ipr
 				}
 				hits.Unlock()
 				overLimit := ipr.Hit()
 				if overLimit {
-					if ipLists["_default_"].contains(cdnIP) {
-						//fmt.Println("but is whitelisted so we don't care.")
-					} else {
+					if ipr.shouldLimit {
 						if err := ipr.Limit(); err != nil {
 							fmt.Printf("Error limiting IP: %s", err)
 						}
+					} else {
+						//fmt.Println("but is whitelisted so we don't care.")
 					}
 				}
 			}
