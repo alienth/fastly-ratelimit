@@ -18,53 +18,66 @@ import (
 	"gopkg.in/mcuadros/go-syslog.v2"
 )
 
-// getIPs takes in an haproxy log line and returns the client IP and the CDN
-// connecting IP which is in the captured request header. For us, the CDN
-// connecting IP happens to be the 8th captured request header.
-func getIPs(logLine string) (*net.IP, *net.IP) {
+type logEntry struct {
+	clientIP  *net.IP
+	cdnIP     *net.IP
+	host      string
+	timestamp time.Time
+}
+
+// parseLog takes in an haproxy log line and returns a logEntry.
+func parseLog(logLine string) *logEntry {
+	var entry logEntry
 	if logLine == "" {
-		return nil, nil
+		return nil
 	}
 	// This string parsing stuff was lifted from TPS
 	var a, b int
 	if a = strings.Index(logLine, "]:") + 3; a == -1 {
-		return nil, nil
+		return nil
 	}
 	if b = strings.Index(logLine[a:], ":"); b == -1 {
-		return nil, nil
+		return nil
 	}
 	clientIPString := logLine[a : a+b]
 	clientIP := net.ParseIP(clientIPString)
 	if clientIP == nil {
-		return nil, nil
+		return nil
 	}
+	entry.clientIP = &clientIP
+
+	logLine = logLine[a+b:]
+	// The subsequent square-bracketed string contains our timestamp
+	if a = strings.Index(logLine, "[") + 1; a == -1 {
+		return &entry
+	}
+	if b = strings.Index(logLine[a:], "]"); b == -1 {
+		return &entry
+	}
+	timestampStr := logLine[a : a+b]
+	entry.timestamp, _ = time.Parse("02/Jan/2006:15:04:05.999", timestampStr)
 
 	logLine = logLine[a+b:]
 	// The first curly-braced block contains our request headers
 	if a = strings.Index(logLine, "{"); a == -1 {
-		return &clientIP, nil
+		return &entry
 	}
 	if b = strings.Index(logLine[a:], "}"); b == -1 {
-		return &clientIP, nil
+		return &entry
 	}
 	bracketedHeaders := logLine[a : a+b]
 	headers := strings.Split(bracketedHeaders, "|")
 	if len(headers) < 7 {
-		return &clientIP, nil
+		return &entry
 	}
+	entry.host = headers[2]
 	ipString := headers[7]
 	cdnIP := net.ParseIP(ipString)
 	if cdnIP == nil {
-		return &clientIP, nil
+		return &entry
 	}
-	return &clientIP, &cdnIP
-}
-
-func getLogTimestamp(logLine string) int64 {
-	timestampStr := strings.Split(logLine, " ")[6]
-	ts, _ := time.Parse("[02/Jan/2006:15:04:05.999]", timestampStr)
-
-	return (ts.Unix())
+	entry.cdnIP = &cdnIP
+	return &entry
 }
 
 type duration struct {
@@ -261,9 +274,12 @@ func (ipr *ipRate) Limit() error {
 	for _, e := range entries {
 		if ipr.ip.String() == e.IP {
 			fmt.Printf("IP %s is already limited.\n", e.IP)
-			// Not all ACL entries were necessarily created by this script, so silently ignore unmarshal errors.
+			// Not all ACL entries were necessarily created by this
+			// script, so silently ignore unmarshal errors and
+			// don't proceed further with the limit. We don't want
+			// to conflict with a manual entry.
 			if err := json.Unmarshal([]byte(e.Comment), ipr); err != nil {
-				break
+				return nil
 			}
 			entry = &util.ACLEntry{Client: client, ID: e.ID, ACLID: e.ACLID, ServiceID: service.ID}
 			break
@@ -449,16 +465,19 @@ func main() {
 				if line, ok = logParts["content"].(string); !ok || line == "" {
 					continue
 				}
-				clientIP, cdnIP := getIPs(line)
-				if cdnIP == nil || clientIP == nil {
+				log := parseLog(line)
+				if log == nil || log.cdnIP == nil || log.clientIP == nil {
 					continue
+				}
+				if time.Now().Sub(log.timestamp) > time.Duration(20)*time.Second {
+					fmt.Printf("Warning: we're lagged behind the log. Log TS: %s, Current time: %s\n", log.timestamp.String(), time.Now().String())
 				}
 				var ipr *ipRate
 				var found bool
 				hits.Lock()
-				if ipr, found = hits.m[cdnIP.String()]; !found {
-					ipr = ipLists.getRate(cdnIP)
-					hits.m[cdnIP.String()] = ipr
+				if ipr, found = hits.m[log.cdnIP.String()]; !found {
+					ipr = ipLists.getRate(log.cdnIP)
+					hits.m[log.cdnIP.String()] = ipr
 				}
 				hits.Unlock()
 				overLimit := ipr.Hit()
