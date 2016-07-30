@@ -96,15 +96,22 @@ type IPList struct {
 	Requests int64
 	ListFile string
 
-	Time        duration
-	Expire      duration
-	LimitExpire duration
+	Time          duration
+	Expire        duration
+	LimitDuration duration
 }
 
 func (d *duration) UnmarshalText(b []byte) error {
 	var err error
 	d.Duration, err = time.ParseDuration(string(b))
 	return err
+}
+
+// multiply takes in a factor and returns a new duration multiplied by that factor.
+func (d duration) multiply(factor float64) duration {
+	var newDuration duration
+	newDuration.Duration = time.Duration(int(float64(d.Seconds())*factor)) * time.Second
+	return newDuration
 }
 
 func (n *ipNet) UnmarshalText(b []byte) error {
@@ -294,9 +301,9 @@ func (ipr *ipRate) Limit() error {
 
 	ipr.LastLimit = time.Now().Unix()
 	ipr.Strikes++
-	limitExpire := time.Duration(int(ipr.list.LimitExpire.Duration.Seconds())*ipr.Strikes) * time.Second
-	ipr.LimitExpire = time.Now().Add(limitExpire).Unix()
-	fmt.Printf("Limit on %s will expire in %f minutes.\n", ipr.ip.String(), limitExpire.Minutes())
+	limitDuration := ipr.list.LimitDuration.multiply(float64(ipr.Strikes))
+	ipr.LimitExpire = time.Now().Add(limitDuration.Duration).Unix()
+	fmt.Printf("Limit on %s will expire in %d minutes.\n", ipr.ip.String(), int(limitDuration.Minutes()))
 	ipr.Expire = time.Now().Add(time.Duration(24) * time.Hour).Unix()
 	comment, err := json.Marshal(ipr)
 	if err != nil {
