@@ -197,7 +197,6 @@ func (lists IPLists) getRate(ip *net.IP) *ipRate {
 		if list.contains(ip) {
 			ipr.bucket = ratelimit.NewBucket(list.Time.Duration, list.Requests)
 			ipr.Expire = time.Now().Add(list.Expire.Duration).Unix()
-			ipr.LimitExpire = time.Now().Add(list.LimitExpire.Duration).Unix()
 			ipr.ip = ip
 			ipr.shouldLimit = list.Limit
 			return &ipr
@@ -207,9 +206,9 @@ func (lists IPLists) getRate(ip *net.IP) *ipRate {
 	list := lists["_default_"]
 	ipr.bucket = ratelimit.NewBucket(list.Time.Duration, list.Requests)
 	ipr.Expire = time.Now().Add(list.Expire.Duration).Unix()
-	ipr.LimitExpire = time.Now().Add(list.LimitExpire.Duration).Unix()
 	ipr.ip = ip
 	ipr.shouldLimit = list.Limit
+	ipr.list = list
 	return &ipr
 }
 
@@ -219,6 +218,7 @@ type ipRate struct {
 	entries     []*util.ACLEntry
 	limited     bool
 	shouldLimit bool
+	list        *IPList
 
 	FirstHit    int64 `json:"first_hit,omitempty"`
 	LastHit     int64 `json:"last_hit,omitempty"`
@@ -294,7 +294,9 @@ func (ipr *ipRate) Limit() error {
 
 	ipr.LastLimit = time.Now().Unix()
 	ipr.Strikes++
-	ipr.LimitExpire = time.Now().Add(time.Duration(45) * time.Minute).Unix()
+	limitExpire := time.Duration(int(ipr.list.LimitExpire.Duration.Seconds())*ipr.Strikes) * time.Second
+	ipr.LimitExpire = time.Now().Add(limitExpire).Unix()
+	fmt.Printf("Limit on %s will expire in %f minutes.\n", ipr.ip.String(), limitExpire.Minutes())
 	ipr.Expire = time.Now().Add(time.Duration(24) * time.Hour).Unix()
 	comment, err := json.Marshal(ipr)
 	if err != nil {
