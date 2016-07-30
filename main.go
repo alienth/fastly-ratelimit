@@ -227,6 +227,8 @@ type ipRate struct {
 	Strikes     int   `json:"strikes,omitempty"`
 	Expire      int64 `json:"-"`
 	LimitExpire int64 `json:"limit_expire,omitempty"`
+
+	sync.RWMutex
 }
 
 // Records a hit and returns true if it is over limit.
@@ -237,6 +239,8 @@ func (ipr *ipRate) Hit() bool {
 		return false
 	}
 
+	ipr.Lock()
+	defer ipr.Unlock()
 	_, isSoonerThanMaxWait := ipr.bucket.TakeMaxDuration(1, 0)
 	if ipr.FirstHit == 0 {
 		ipr.FirstHit = time.Now().Unix()
@@ -271,6 +275,8 @@ func (ipr *ipRate) Limit() error {
 
 	var entry *util.ACLEntry
 
+	ipr.Lock()
+	defer ipr.Unlock()
 	for _, e := range entries {
 		if ipr.ip.String() == e.IP {
 			fmt.Printf("IP %s is already limited.\n", e.IP)
@@ -315,6 +321,8 @@ func (ipr *ipRate) Limit() error {
 
 // Removes an IP from ratelimits
 func (ipr *ipRate) RemoveLimit() error {
+	ipr.Lock()
+	defer ipr.Unlock()
 	if len(ipr.entries) > 0 {
 		fmt.Printf("Unlimiting IP %s\n", ipr.ip.String())
 		for i, entry := range ipr.entries {
@@ -334,34 +342,47 @@ type hitMap struct {
 	m map[string]*ipRate
 }
 
+// getMap returns a copy of the hitmap. This is used to prevent long lock times on the hitMap
+func (hits *hitMap) getMap() map[string]*ipRate {
+	newMap := make(map[string]*ipRate)
+	hits.RLock()
+	for ip, ipr := range hits.m {
+		newMap[ip] = ipr
+	}
+	hits.RUnlock()
+	return newMap
+}
+
 func (hits *hitMap) expireRecords() {
 	for {
-		hits.Lock()
-		for ip, ipr := range hits.m {
+		hitMapCopy := hits.getMap()
+		for ip, ipr := range hitMapCopy {
+			ipr.Lock()
 			if ipr.Expire < time.Now().Unix() {
 				if err := ipr.RemoveLimit(); err != nil {
 					fmt.Println(err)
 				} else {
+					hits.Lock()
 					delete(hits.m, ip)
+					hits.Unlock()
 				}
 			}
+			ipr.Unlock()
 		}
-		hits.Unlock()
 		time.Sleep(time.Duration(60) * time.Second)
 	}
 }
 
 func (hits *hitMap) expireLimits() {
 	for {
-		hits.Lock()
-		for _, ipr := range hits.m {
+		hitMapCopy := hits.getMap()
+		for _, ipr := range hitMapCopy {
 			if ipr.LimitExpire < time.Now().Unix() {
 				if err := ipr.RemoveLimit(); err != nil {
 					fmt.Println(err)
 				}
 			}
 		}
-		hits.Unlock()
 		time.Sleep(time.Duration(15) * time.Second)
 	}
 }
@@ -474,7 +495,11 @@ func main() {
 				}
 				var ipr *ipRate
 				var found bool
+				ts := time.Now()
 				hits.Lock()
+				if d := ts.Sub(time.Now()); d > time.Duration(1)*time.Second {
+					fmt.Printf("Blocked for %s seconds waiting for hits lock\n", d.Seconds())
+				}
 				if ipr, found = hits.m[log.cdnIP.String()]; !found {
 					ipr = ipLists.getRate(log.cdnIP)
 					hits.m[log.cdnIP.String()] = ipr
