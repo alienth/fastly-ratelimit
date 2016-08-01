@@ -481,8 +481,8 @@ func main() {
 				if log == nil || log.cdnIP == nil || log.clientIP == nil {
 					continue
 				}
-				if time.Now().Sub(log.timestamp) > time.Duration(20)*time.Second {
-					fmt.Printf("Warning: we're lagged behind the log. Log TS: %s, Current time: %s\n", log.timestamp.String(), time.Now().String())
+				if time.Now().Sub(log.timestamp) > time.Duration(2)*time.Minute {
+					fmt.Printf("Warning: old log line. Log TS: %s, Current time: %s\n", log.timestamp.String(), time.Now().String())
 				}
 				var ipr *ipRate
 				var found bool
