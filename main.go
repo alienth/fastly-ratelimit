@@ -200,22 +200,21 @@ func (l *IPList) readListFile() error {
 
 func (lists IPLists) getRate(ip *net.IP) *ipRate {
 	var ipr ipRate
-	for _, list := range lists {
-		if list.contains(ip) {
-			ipr.bucket = ratelimit.NewBucket(list.Time.Duration, list.Requests)
-			ipr.Expire = time.Now().Add(list.Expire.Duration).Unix()
-			ipr.ip = ip
-			ipr.shouldLimit = list.Limit
-			return &ipr
+	var ipList *IPList
+	for _, ipList = range lists {
+		if ipList.contains(ip) {
+			break
 		}
 	}
+	if ipList == nil {
+		ipList = lists["_default_"]
+	}
 
-	list := lists["_default_"]
-	ipr.bucket = ratelimit.NewBucket(list.Time.Duration, list.Requests)
-	ipr.Expire = time.Now().Add(list.Expire.Duration).Unix()
+	ipr.bucket = ratelimit.NewBucket(ipList.Time.Duration, ipList.Requests)
+	ipr.Expire = time.Now().Add(ipList.Expire.Duration).Unix()
 	ipr.ip = ip
-	ipr.shouldLimit = list.Limit
-	ipr.list = list
+	ipr.shouldLimit = ipList.Limit
+	ipr.list = ipList
 	return &ipr
 }
 
