@@ -446,8 +446,9 @@ func main() {
 
 	app.Flags = []cli.Flag{
 		cli.StringFlag{
-			Name:  "whitelist, w",
-			Usage: "Read `FILE` containing addresses which should whitelisted from any bans.",
+			Name:  "config, c",
+			Usage: "Read config `FILE`.",
+			Value: "config.toml",
 		},
 		cli.StringFlag{
 			Name:  "listen, l",
@@ -467,7 +468,7 @@ func main() {
 		handler := syslog.NewChannelHandler(channel)
 
 		var err error
-		if ipLists, err = readConfig("config.toml"); err != nil {
+		if ipLists, err = readConfig(c.GlobalString("config")); err != nil {
 			return cli.NewExitError(fmt.Sprintf("Error reading config file:\n%s\n", err), -1)
 		}
 
