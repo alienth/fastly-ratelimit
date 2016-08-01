@@ -365,8 +365,8 @@ func (hits *hitMap) expireLimits() {
 }
 
 // Fetches down remote ACLs and populates local hitMap with previously stored data.
-func (hits *hitMap) importIPRates() error {
-	service, err := util.GetServiceByName(client, "stackoverflow.com")
+func (hits *hitMap) importIPRates(serviceName string) error {
+	service, err := util.GetServiceByName(client, serviceName)
 	if err != nil {
 		return err
 	}
@@ -464,7 +464,7 @@ func main() {
 		}
 
 		var hits = hitMap{m: make(map[string]*ipRate)}
-		if err := hits.importIPRates(); err != nil {
+		if err := hits.importIPRates(serviceName); err != nil {
 			return cli.NewExitError(fmt.Sprintf("Error importing existing IP rates: %s", err), -1)
 		}
 		go hits.expireRecords()
