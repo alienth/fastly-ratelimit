@@ -272,7 +272,6 @@ func (ipr *ipRate) Limit(serviceName string) error {
 	ipr.Strikes++
 	limitDuration := ipr.list.LimitDuration.multiply(float64(ipr.Strikes))
 	ipr.LimitExpire = time.Now().Add(limitDuration.Duration).Unix()
-	fmt.Printf("Limit on %s will expire in %d minutes.\n", ipr.ip.String(), int(limitDuration.Minutes()))
 	ipr.Expire = time.Now().Add(time.Duration(24) * time.Hour).Unix()
 	comment, err := json.Marshal(ipr)
 	if err != nil {
@@ -283,7 +282,7 @@ func (ipr *ipRate) Limit(serviceName string) error {
 		if err != nil {
 			return err
 		}
-		fmt.Printf("Limiting IP %s\n", ipr.ip.String())
+		fmt.Printf("Limiting IP %s for %d minutes\n", ipr.ip.String(), int(limitDuration.Minutes()))
 		if err = entry.Add(); err != nil {
 			return err
 		}
