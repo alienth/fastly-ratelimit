@@ -258,45 +258,15 @@ func (ipr *ipRate) Hit() bool {
 }
 
 // Limit adds an IP to a fastly edge ACL
-func (ipr *ipRate) Limit() error {
+func (ipr *ipRate) Limit(serviceName string) error {
 	if !ipr.shouldLimit {
 		return nil
-	}
-
-	service, err := util.GetServiceByName(client, "stackoverflow.com")
-	if err != nil {
-		return err
-	}
-
-	acl, err := util.NewACL(client, service.Name, "ratelimit")
-	if err != nil {
-		return err
-	}
-
-	// TODO this is heavy.. cache? do we even need?(see below)
-	entries, err := acl.ListEntries()
-	if err != nil {
-		return err
 	}
 
 	var entry *util.ACLEntry
 
 	ipr.Lock()
 	defer ipr.Unlock()
-	for _, e := range entries {
-		if ipr.ip.String() == e.IP {
-			fmt.Printf("IP %s is already limited.\n", e.IP)
-			// Not all ACL entries were necessarily created by this
-			// script, so silently ignore unmarshal errors and
-			// don't proceed further with the limit. We don't want
-			// to conflict with a manual entry.
-			if err := json.Unmarshal([]byte(e.Comment), ipr); err != nil {
-				return nil
-			}
-			entry = &util.ACLEntry{Client: client, ID: e.ID, ACLID: e.ACLID, ServiceID: service.ID}
-			break
-		}
-	}
 
 	ipr.LastLimit = time.Now().Unix()
 	ipr.Strikes++
@@ -309,7 +279,7 @@ func (ipr *ipRate) Limit() error {
 		return err
 	}
 	if entry == nil {
-		entry, err = util.NewACLEntry(client, service.Name, "ratelimit", ipr.ip.String(), 0, string(comment), false)
+		entry, err = util.NewACLEntry(client, serviceName, "ratelimit", ipr.ip.String(), 0, string(comment), false)
 		if err != nil {
 			return err
 		}
@@ -462,6 +432,16 @@ func main() {
 			Value:  util.GetFastlyKey(),
 		},
 	}
+	app.ArgsUsage = "<SERVICE_NAME>"
+	app.Before = func(c *cli.Context) error {
+		if !c.Args().Present() {
+			return cli.NewExitError("Please specify service.", -1)
+		}
+		if len(c.Args()) > 1 {
+			return cli.NewExitError("Invalid usage. More arguments received than expected.", -1)
+		}
+		return nil
+	}
 	app.Action = func(c *cli.Context) error {
 		client, _ = fastly.NewClient(c.GlobalString("fastly-key"))
 		channel := make(syslog.LogPartsChannel)
@@ -471,6 +451,8 @@ func main() {
 		if ipLists, err = readConfig(c.GlobalString("config")); err != nil {
 			return cli.NewExitError(fmt.Sprintf("Error reading config file:\n%s\n", err), -1)
 		}
+
+		serviceName := c.Args().Get(0)
 
 		server := syslog.NewServer()
 		server.SetFormat(syslog.RFC3164)
@@ -517,7 +499,7 @@ func main() {
 				overLimit := ipr.Hit()
 				if overLimit {
 					if ipr.shouldLimit {
-						if err := ipr.Limit(); err != nil {
+						if err := ipr.Limit(serviceName); err != nil {
 							fmt.Printf("Error limiting IP: %s", err)
 						}
 					} else {
