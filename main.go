@@ -263,12 +263,12 @@ func (ipr *ipRate) Limit() error {
 		return nil
 	}
 
-	service, err := util.GetServiceByNameOrID(client, "teststackoverflow.com")
+	service, err := util.GetServiceByName(client, "stackoverflow.com")
 	if err != nil {
 		return err
 	}
 
-	acl, err := util.NewACL(client, service.ID, "ratelimit")
+	acl, err := util.NewACL(client, service.Name, "ratelimit")
 	if err != nil {
 		return err
 	}
@@ -309,7 +309,7 @@ func (ipr *ipRate) Limit() error {
 		return err
 	}
 	if entry == nil {
-		entry, err = util.NewACLEntry(client, service.ID, "ratelimit", ipr.ip.String(), 0, string(comment), false)
+		entry, err = util.NewACLEntry(client, service.Name, "ratelimit", ipr.ip.String(), 0, string(comment), false)
 		if err != nil {
 			return err
 		}
@@ -397,12 +397,12 @@ func (hits *hitMap) expireLimits() {
 
 // Fetches down remote ACLs and populates local hitMap with previously stored data.
 func (hits *hitMap) importIPRates() error {
-	service, err := util.GetServiceByNameOrID(client, "teststackoverflow.com")
+	service, err := util.GetServiceByName(client, "stackoverflow.com")
 	if err != nil {
 		return err
 	}
 
-	acl, err := util.NewACL(client, service.ID, "ratelimit")
+	acl, err := util.NewACL(client, service.Name, "ratelimit")
 	if err != nil {
 		return err
 	}
