@@ -334,7 +334,6 @@ func (hits *hitMap) expireRecords() {
 	for {
 		hitMapCopy := hits.getMap()
 		for ip, ipr := range hitMapCopy {
-			ipr.Lock()
 			if ipr.Expire < time.Now().Unix() {
 				if err := ipr.RemoveLimit(); err != nil {
 					fmt.Println(err)
@@ -344,7 +343,6 @@ func (hits *hitMap) expireRecords() {
 					hits.Unlock()
 				}
 			}
-			ipr.Unlock()
 		}
 		time.Sleep(time.Duration(60) * time.Second)
 	}
