@@ -283,8 +283,10 @@ func (ipr *ipRate) Limit(serviceName string) error {
 			return err
 		}
 		fmt.Printf("Limiting IP %s for %d minutes\n", ipr.ip.String(), int(limitDuration.Minutes()))
-		if err = entry.Add(); err != nil {
-			return err
+		if !noop {
+			if err = entry.Add(); err != nil {
+				return err
+			}
 		}
 	} else {
 		entry.Comment = string(comment)
@@ -303,8 +305,10 @@ func (ipr *ipRate) RemoveLimit() error {
 	if len(ipr.entries) > 0 {
 		fmt.Printf("Unlimiting IP %s\n", ipr.ip.String())
 		for i, entry := range ipr.entries {
-			if err := entry.Remove(); err != nil {
-				return fmt.Errorf("Error removing limit for IP %s: %s", ipr.ip.String(), err)
+			if !noop {
+				if err := entry.Remove(); err != nil {
+					return fmt.Errorf("Error removing limit for IP %s: %s", ipr.ip.String(), err)
+				}
 			}
 			ipr.entries[i] = nil
 		}
@@ -406,6 +410,7 @@ func (hits *hitMap) importIPRates(serviceName string) error {
 
 var client *fastly.Client
 var ipLists IPLists
+var noop bool
 
 func main() {
 	app := cli.NewApp()
@@ -428,6 +433,10 @@ func main() {
 			EnvVar: "FASTLY_KEY",
 			Value:  util.GetFastlyKey(),
 		},
+		cli.BoolFlag{
+			Name:  "noop, n",
+			Usage: "Noop mode. Print what we'd do, but don't actually do anything.",
+		},
 	}
 	app.ArgsUsage = "<SERVICE_NAME>"
 	app.Before = func(c *cli.Context) error {
@@ -443,6 +452,8 @@ func main() {
 		client, _ = fastly.NewClient(c.GlobalString("fastly-key"))
 		channel := make(syslog.LogPartsChannel)
 		handler := syslog.NewChannelHandler(channel)
+
+		noop = c.GlobalBool("noop")
 
 		var err error
 		if ipLists, err = readConfig(c.GlobalString("config")); err != nil {
