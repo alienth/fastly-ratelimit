@@ -93,7 +93,7 @@ func (e *ACLEntry) Remove() error {
 }
 
 func NewACL(client *fastly.Client, serviceName, aclName string) (*ACL, error) {
-	service, err := GetServiceByNameOrID(client, serviceName)
+	service, err := GetServiceByName(client, serviceName)
 	if err != nil {
 		return nil, err
 	}
