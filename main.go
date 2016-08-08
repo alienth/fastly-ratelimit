@@ -6,6 +6,8 @@ import (
 	"fmt"
 	"net"
 	"os"
+	"path"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -17,6 +19,9 @@ import (
 	"github.com/urfave/cli"
 	"gopkg.in/mcuadros/go-syslog.v2"
 )
+
+// The edge ACL which we will be interacting with in fastly.
+const aclName = "ratelimit"
 
 type logEntry struct {
 	clientIP  *net.IP
@@ -258,12 +263,18 @@ func (ipr *ipRate) Hit() bool {
 }
 
 // Limit adds an IP to a fastly edge ACL
-func (ipr *ipRate) Limit(serviceName string) error {
+func (ipr *ipRate) Limit(service *fastly.Service) error {
 	if !ipr.shouldLimit {
 		return nil
 	}
 
 	var entry *util.ACLEntry
+	for _, e := range ipr.entries {
+		if e.ServiceID == service.ID {
+			entry = e
+			break
+		}
+	}
 
 	ipr.Lock()
 	defer ipr.Unlock()
@@ -278,7 +289,7 @@ func (ipr *ipRate) Limit(serviceName string) error {
 		return err
 	}
 	if entry == nil {
-		entry, err = util.NewACLEntry(client, serviceName, "ratelimit", ipr.ip.String(), 0, string(comment), false)
+		entry, err = util.NewACLEntry(client, service.Name, aclName, ipr.ip.String(), 0, string(comment), false)
 		if err != nil {
 			return err
 		}
@@ -367,29 +378,30 @@ func (hits *hitMap) expireLimits() {
 }
 
 // Fetches down remote ACLs and populates local hitMap with previously stored data.
-func (hits *hitMap) importIPRates(serviceName string) error {
-	service, err := util.GetServiceByName(client, serviceName)
-	if err != nil {
-		return err
-	}
+func (hits *hitMap) importIPRates(serviceDomains ServiceDomains) error {
+	aclEntries := make([]*util.ACLEntry, 0)
+	for service, _ := range serviceDomains {
+		acl, err := util.NewACL(client, service.Name, aclName)
+		if err != nil {
+			return err
+		}
 
-	acl, err := util.NewACL(client, service.Name, "ratelimit")
-	if err != nil {
-		return err
-	}
+		entries, err := acl.ListEntries()
+		if err != nil {
+			return err
+		}
 
-	entries, err := acl.ListEntries()
-	if err != nil {
-		return err
+		for _, e := range entries {
+			entry := &util.ACLEntry{Client: client, ID: e.ID, ACLID: e.ACLID, ServiceID: service.ID, IP: e.IP, Comment: e.Comment, Subnet: e.Subnet, Negated: e.Negated}
+			aclEntries = append(aclEntries, entry)
+		}
 	}
-
-	// TODO: work with IPs existing in multiple services.
-	for _, e := range entries {
+	for _, entry := range aclEntries {
 		var ipr *ipRate
 		var found bool
 		hits.Lock()
-		if ipr, found = hits.m[e.IP]; !found {
-			ip := net.ParseIP(e.IP)
+		if ipr, found = hits.m[entry.IP]; !found {
+			ip := net.ParseIP(entry.IP)
 			ipr = ipLists.getRate(&ip)
 			if ip == nil {
 				return fmt.Errorf("Unable to parse IP %s in ACL.")
@@ -397,15 +409,92 @@ func (hits *hitMap) importIPRates(serviceName string) error {
 			hits.m[ip.String()] = ipr
 		}
 		hits.Unlock()
-		if err := json.Unmarshal([]byte(e.Comment), ipr); err != nil {
+
+		var placeholder ipRate
+		err := json.Unmarshal([]byte(entry.Comment), &placeholder)
+		if err != nil {
+			// We may not have created an entry, so ignore entries with
+			// comments that we don't recognize.
 			break
 		}
-		entry := &util.ACLEntry{Client: client, ID: e.ID, ACLID: e.ACLID, ServiceID: service.ID}
+		if ipr.LastHit < placeholder.LastHit {
+			json.Unmarshal([]byte(entry.Comment), &ipr)
+		}
 		ipr.limited = true
 		ipr.entries = append(ipr.entries, entry)
 	}
 
 	return nil
+}
+
+type ServiceDomains map[*fastly.Service][]fastly.Domain
+
+func getServiceDomains() (ServiceDomains, error) {
+	serviceDomains := make(ServiceDomains)
+
+	services, err := client.ListServices(&fastly.ListServicesInput{})
+	if err != nil {
+		return nil, err
+	}
+
+	for _, s := range services {
+		var i fastly.ListDomainsInput
+		i.Service = s.ID
+		i.Version = strconv.Itoa(int(s.ActiveVersion))
+		domains, err := client.ListDomains(&i)
+		if err != nil {
+			return nil, err
+		}
+
+		var x fastly.ListACLsInput
+		x.Service = s.ID
+		x.Version = strconv.Itoa(int(s.ActiveVersion))
+		acls, err := client.ListACLs(&x)
+		if err != nil {
+			return nil, err
+		}
+		var found bool
+		for _, acl := range acls {
+			if acl.Name == aclName {
+				found = true
+				break
+			}
+		}
+		if found {
+			for _, d := range domains {
+				serviceDomains[s] = append(serviceDomains[s], *d)
+			}
+		}
+	}
+	return serviceDomains, nil
+}
+
+// getServiceByHost takes in a hostname and returns the faslty service
+// associated with that hostname.
+func (services ServiceDomains) getServiceByHost(hostname string) (*fastly.Service, error) {
+	for s, domains := range services {
+		for _, d := range domains {
+			if d.Name == hostname {
+				return s, nil
+			}
+		}
+		for _, d := range domains {
+			// The fastly hostname can contain wildcard records such as
+			// *.stackoverflow.com. We use path.Match() to match on those.
+			// A specific domain will override a wildcard, which is why
+			// we're doing this in a second loop.
+			found, err := path.Match(d.Name, hostname)
+			if err != nil {
+				// only possible error here would be a malformed pattern
+				return nil, err
+			}
+			if found {
+				return s, nil
+			}
+		}
+	}
+
+	return nil, nil
 }
 
 var client *fastly.Client
@@ -438,12 +527,8 @@ func main() {
 			Usage: "Noop mode. Print what we'd do, but don't actually do anything.",
 		},
 	}
-	app.ArgsUsage = "<SERVICE_NAME>"
 	app.Before = func(c *cli.Context) error {
-		if !c.Args().Present() {
-			return cli.NewExitError("Please specify service.", -1)
-		}
-		if len(c.Args()) > 1 {
+		if len(c.Args()) > 0 {
 			return cli.NewExitError("Invalid usage. More arguments received than expected.", -1)
 		}
 		return nil
@@ -460,7 +545,10 @@ func main() {
 			return cli.NewExitError(fmt.Sprintf("Error reading config file:\n%s\n", err), -1)
 		}
 
-		serviceName := c.Args().Get(0)
+		serviceDomains, err := getServiceDomains()
+		if err != nil {
+			return cli.NewExitError(fmt.Sprintf("Error fetching fasty domains:\n%s\n", err), -1)
+		}
 
 		server := syslog.NewServer()
 		server.SetFormat(syslog.RFC3164)
@@ -473,7 +561,7 @@ func main() {
 		}
 
 		var hits = hitMap{m: make(map[string]*ipRate)}
-		if err := hits.importIPRates(serviceName); err != nil {
+		if err := hits.importIPRates(serviceDomains); err != nil {
 			return cli.NewExitError(fmt.Sprintf("Error importing existing IP rates: %s", err), -1)
 		}
 		go hits.expireRecords()
@@ -505,10 +593,18 @@ func main() {
 				}
 				hits.Unlock()
 				overLimit := ipr.Hit()
+				service, err := serviceDomains.getServiceByHost(log.host)
+				if err != nil {
+					fmt.Printf("Error while finding fastly service for domain %s: %s\n.", log.host, err)
+				}
+				if service == nil {
+					fmt.Printf("Found request for host %s which is not in fastly. Ignoring\n", log.host)
+					continue
+				}
 				if overLimit {
 					if ipr.shouldLimit {
-						if err := ipr.Limit(serviceName); err != nil {
-							fmt.Printf("Error limiting IP: %s", err)
+						if err := ipr.Limit(service); err != nil {
+							fmt.Printf("Error limiting IP: %s\n", err)
 						}
 					} else {
 						//fmt.Println("but is whitelisted so we don't care.")
