@@ -471,7 +471,7 @@ func (services ServiceDomains) getServiceByHost(hostname string) (*fastly.Servic
 			// *.stackoverflow.com. We use path.Match() to match on those.
 			// A specific domain will override a wildcard, which is why
 			// we're doing this in a second loop.
-			found, err := path.Match(d.Name, hostname)
+			found, err := path.Match(d.Name, strings.ToLower(hostname))
 			if err != nil {
 				// only possible error here would be a malformed pattern
 				return nil, err
