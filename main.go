@@ -206,8 +206,9 @@ func (l *IPList) readListFile() error {
 func (lists IPLists) getRate(ip *net.IP) *ipRate {
 	var ipr ipRate
 	var ipList *IPList
-	for _, ipList = range lists {
-		if ipList.contains(ip) {
+	for _, l := range lists {
+		if l.contains(ip) {
+			ipList = l
 			break
 		}
 	}
