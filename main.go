@@ -244,12 +244,6 @@ type ipRate struct {
 
 // Records a hit and returns true if it is over limit.
 func (ipr *ipRate) Hit() bool {
-	// Here we pretend that the IP performed no hits before the limit was removed,
-	// since in testing the IP is not actually limited.
-	if ipr.limited {
-		return false
-	}
-
 	ipr.Lock()
 	defer ipr.Unlock()
 	_, isSoonerThanMaxWait := ipr.bucket.TakeMaxDuration(1, 0)
@@ -268,11 +262,10 @@ func (ipr *ipRate) Limit(service *fastly.Service) error {
 		return nil
 	}
 
-	var entry *util.ACLEntry
+	// Return if this IP is already limited on this service.
 	for _, e := range ipr.entries {
 		if e.ServiceID == service.ID {
-			entry = e
-			break
+			return nil
 		}
 	}
 
@@ -288,20 +281,15 @@ func (ipr *ipRate) Limit(service *fastly.Service) error {
 	if err != nil {
 		return err
 	}
-	if entry == nil {
-		entry, err = util.NewACLEntry(client, service.Name, aclName, ipr.ip.String(), 0, string(comment), false)
-		if err != nil {
+	entry, err := util.NewACLEntry(client, service.Name, aclName, ipr.ip.String(), 0, string(comment), false)
+	if err != nil {
+		return err
+	}
+	fmt.Printf("Limiting IP %s for %d minutes on service %s\n", ipr.ip.String(), int(limitDuration.Minutes()), service.Name)
+	if !noop {
+		if err = entry.Add(); err != nil {
 			return err
 		}
-		fmt.Printf("Limiting IP %s for %d minutes\n", ipr.ip.String(), int(limitDuration.Minutes()))
-		if !noop {
-			if err = entry.Add(); err != nil {
-				return err
-			}
-		}
-	} else {
-		entry.Comment = string(comment)
-		//		entry.Update()
 	}
 
 	ipr.limited = true
