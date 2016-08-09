@@ -273,7 +273,12 @@ func (ipr *ipRate) Limit(service *fastly.Service) error {
 	defer ipr.Unlock()
 
 	ipr.LastLimit = time.Now().Unix()
-	ipr.Strikes++
+	if !ipr.limited {
+		// Only increase the duration time if we're not already
+		// limited.  This is because we might just be applying a limit
+		// to a new service that we saw a hit on.
+		ipr.Strikes++
+	}
 	limitDuration := ipr.list.LimitDuration.multiply(float64(ipr.Strikes))
 	ipr.LimitExpire = time.Now().Add(limitDuration.Duration).Unix()
 	ipr.Expire = time.Now().Add(time.Duration(24) * time.Hour).Unix()
