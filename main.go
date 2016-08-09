@@ -309,6 +309,16 @@ func (ipr *ipRate) RemoveLimit() error {
 	defer ipr.Unlock()
 	if len(ipr.entries) > 0 {
 		fmt.Printf("Unlimiting IP %s\n", ipr.ip.String())
+		// defer the filtration in case we get an error during the removal loop
+		defer func(ipr *ipRate) {
+			newEntries := ipr.entries[:0]
+			for _, e := range ipr.entries {
+				if e != nil {
+					newEntries = append(newEntries, e)
+				}
+			}
+			ipr.entries = newEntries
+		}(ipr)
 		for i, entry := range ipr.entries {
 			if !noop {
 				if err := entry.Remove(); err != nil {
@@ -317,7 +327,6 @@ func (ipr *ipRate) RemoveLimit() error {
 			}
 			ipr.entries[i] = nil
 		}
-		ipr.entries = ipr.entries[:0]
 		ipr.limited = false
 	}
 	return nil
