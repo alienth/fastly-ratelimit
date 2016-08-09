@@ -259,6 +259,9 @@ func (ipr *ipRate) Hit() bool {
 
 // Limit adds an IP to a fastly edge ACL
 func (ipr *ipRate) Limit(service *fastly.Service) error {
+	ipr.Lock()
+	defer ipr.Unlock()
+
 	if !ipr.shouldLimit {
 		return nil
 	}
@@ -269,9 +272,6 @@ func (ipr *ipRate) Limit(service *fastly.Service) error {
 			return nil
 		}
 	}
-
-	ipr.Lock()
-	defer ipr.Unlock()
 
 	ipr.LastLimit = time.Now().Unix()
 	if !ipr.limited {
