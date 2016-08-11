@@ -257,14 +257,13 @@ func (l *IPList) getDimension(log *logEntry) *Dimension {
 	case DimensionFrontend:
 		return &log.frontend
 	}
-	return &Dimension{Type: DimensionNone}
+	return &Dimension{}
 }
 
 type DimensionType int
 
 const (
-	DimensionNone DimensionType = 1 << iota
-	DimensionBackend
+	DimensionBackend DimensionType = 1 << iota
 	DimensionFrontend
 )
 
