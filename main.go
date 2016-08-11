@@ -573,6 +573,8 @@ func (services ServiceDomains) getServiceByHost(hostname string) (*fastly.Servic
 var client *fastly.Client
 var ipLists IPLists
 var noop bool
+// TODO pass this along in context to the webserver instead of
+// making it global.
 var hits = hitMap{m: make(map[string]*ipRate)}
 
 func main() {
