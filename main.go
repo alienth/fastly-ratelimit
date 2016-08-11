@@ -432,6 +432,7 @@ func (hits *hitMap) expireRecords() {
 				}
 			}
 		}
+		hitMapCopy = nil
 		time.Sleep(time.Duration(60) * time.Second)
 	}
 }
