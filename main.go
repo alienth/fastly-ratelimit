@@ -27,8 +27,8 @@ const aclName = "ratelimit"
 type logEntry struct {
 	clientIP  *net.IP
 	cdnIP     *net.IP
-	host      string
 	timestamp time.Time
+	host      Dimension
 	backend   Dimension
 	frontend  Dimension
 }
@@ -98,7 +98,7 @@ func parseLog(logLine string) *logEntry {
 	if len(headers) < 7 {
 		return &entry
 	}
-	entry.host = headers[2]
+	entry.host = Dimension{Type: DimensionHost, Value: headers[2]}
 	ipString := headers[7]
 	cdnIP := net.ParseIP(ipString)
 	if cdnIP == nil {
@@ -256,6 +256,8 @@ func (l *IPList) getDimension(log *logEntry) *Dimension {
 		return &log.backend
 	case DimensionFrontend:
 		return &log.frontend
+	case DimensionHost:
+		return &log.host
 	}
 	return &Dimension{}
 }
@@ -265,6 +267,7 @@ type DimensionType int
 const (
 	DimensionBackend DimensionType = 1 << iota
 	DimensionFrontend
+	DimensionHost
 )
 
 func (t *DimensionType) UnmarshalText(b []byte) error {
@@ -274,6 +277,8 @@ func (t *DimensionType) UnmarshalText(b []byte) error {
 		*t = DimensionBackend
 	case "frontend":
 		*t = DimensionFrontend
+	case "host":
+		*t = DimensionHost
 	default:
 		return fmt.Errorf("Unrecognized dimension type %s\n", s)
 	}
@@ -671,12 +676,12 @@ func main() {
 				hits.Unlock()
 				dimension := ipr.list.getDimension(log)
 				overLimit := ipr.Hit(dimension)
-				service, err := serviceDomains.getServiceByHost(log.host)
+				service, err := serviceDomains.getServiceByHost(log.host.Value)
 				if err != nil {
-					fmt.Printf("Error while finding fastly service for domain %s: %s\n.", log.host, err)
+					fmt.Printf("Error while finding fastly service for domain %s: %s\n.", log.host.Value, err)
 				}
 				if service == nil {
-					fmt.Printf("Found request for host %s which is not in fastly. Ignoring\n", log.host)
+					fmt.Printf("Found request for host %s which is not in fastly. Ignoring\n", log.host.Value)
 					continue
 				}
 				if overLimit {
