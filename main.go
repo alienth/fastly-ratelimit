@@ -248,9 +248,9 @@ func (lists IPLists) getRate(ip *net.IP) *ipRate {
 	return &ipr
 }
 
-// getDimension takes in a logEntry and spits out the Dimensions we
-// want to bucket by for this IPList.
-func (l *IPList) getDimension(log *logEntry) *Dimension {
+// getDimension takes in a service and a logEntry and spits out the Dimensions
+// we want to bucket by for this IPList.
+func (l *IPList) getDimension(log *logEntry, service *fastly.Service) *Dimension {
 	switch l.DimensionType {
 	case DimensionBackend:
 		return &log.backend
@@ -258,6 +258,8 @@ func (l *IPList) getDimension(log *logEntry) *Dimension {
 		return &log.frontend
 	case DimensionHost:
 		return &log.host
+	case DimensionService:
+		return &Dimension{Type: l.DimensionType, Value: service.Name}
 	}
 	return &Dimension{}
 }
@@ -268,6 +270,7 @@ const (
 	DimensionBackend DimensionType = 1 << iota
 	DimensionFrontend
 	DimensionHost
+	DimensionService
 )
 
 func (t *DimensionType) UnmarshalText(b []byte) error {
@@ -279,6 +282,8 @@ func (t *DimensionType) UnmarshalText(b []byte) error {
 		*t = DimensionFrontend
 	case "host":
 		*t = DimensionHost
+	case "service":
+		*t = DimensionService
 	default:
 		return fmt.Errorf("Unrecognized dimension type %s\n", s)
 	}
@@ -578,6 +583,7 @@ func (services ServiceDomains) getServiceByHost(hostname string) (*fastly.Servic
 var client *fastly.Client
 var ipLists IPLists
 var noop bool
+
 // TODO pass this along in context to the webserver instead of
 // making it global.
 var hits = hitMap{m: make(map[string]*ipRate)}
@@ -674,8 +680,6 @@ func main() {
 					hits.m[log.cdnIP.String()] = ipr
 				}
 				hits.Unlock()
-				dimension := ipr.list.getDimension(log)
-				overLimit := ipr.Hit(dimension)
 				service, err := serviceDomains.getServiceByHost(log.host.Value)
 				if err != nil {
 					fmt.Printf("Error while finding fastly service for domain %s: %s\n.", log.host.Value, err)
@@ -684,6 +688,8 @@ func main() {
 					fmt.Printf("Found request for host %s which is not in fastly. Ignoring\n", log.host.Value)
 					continue
 				}
+				dimension := ipr.list.getDimension(log, service)
+				overLimit := ipr.Hit(dimension)
 				if overLimit {
 					if ipr.shouldLimit {
 						if err := ipr.Limit(service); err != nil {
