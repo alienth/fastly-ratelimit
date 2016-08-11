@@ -323,7 +323,7 @@ func (ipr *ipRate) Hit(dimension *Dimension) bool {
 	}
 	ipr.LastHit = time.Now().Unix()
 	ipr.Hits++
-	ipr.Expire = time.Now().Add(time.Duration(1) * time.Hour).Unix()
+	ipr.Expire = time.Now().Add(ipr.list.Expire.Duration).Unix()
 	return overlimit
 }
 
