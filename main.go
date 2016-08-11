@@ -310,7 +310,8 @@ func (ipr *ipRate) Hit(dimension *Dimension) bool {
 	ipr.Lock()
 	defer ipr.Unlock()
 	if _, found := ipr.buckets[*dimension]; !found {
-		ipr.buckets[*dimension] = ratelimit.NewBucket(ipr.list.Time.Duration, ipr.list.Requests)
+		rate := float64(ipr.list.Requests) / ipr.list.Time.Duration.Seconds()
+		ipr.buckets[*dimension] = ratelimit.NewBucketWithRate(rate, ipr.list.Requests)
 	}
 	_, isSoonerThanMaxWait := ipr.buckets[*dimension].TakeMaxDuration(1, 0)
 	if ipr.FirstHit == 0 {
