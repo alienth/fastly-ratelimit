@@ -313,14 +313,18 @@ func (ipr *ipRate) Hit(dimension *Dimension) bool {
 		rate := float64(ipr.list.Requests) / ipr.list.Time.Duration.Seconds()
 		ipr.buckets[*dimension] = ratelimit.NewBucketWithRate(rate, ipr.list.Requests)
 	}
-	_, isSoonerThanMaxWait := ipr.buckets[*dimension].TakeMaxDuration(1, 0)
+	var overlimit bool
+	waitTime := ipr.buckets[*dimension].Take(1)
+	if waitTime != 0 {
+		overlimit = true
+	}
 	if ipr.FirstHit == 0 {
 		ipr.FirstHit = time.Now().Unix()
 	}
 	ipr.LastHit = time.Now().Unix()
 	ipr.Hits++
 	ipr.Expire = time.Now().Add(time.Duration(1) * time.Hour).Unix()
-	return !isSoonerThanMaxWait
+	return overlimit
 }
 
 // Limit adds an IP to a fastly edge ACL
