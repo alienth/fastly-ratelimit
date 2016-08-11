@@ -28,6 +28,8 @@ type logEntry struct {
 	cdnIP     *net.IP
 	host      string
 	timestamp time.Time
+	backend   Dimension
+	frontend  Dimension
 }
 
 // parseLog takes in an haproxy log line and returns a logEntry.
@@ -61,6 +63,26 @@ func parseLog(logLine string) *logEntry {
 	}
 	timestampStr := logLine[a : a+b]
 	entry.timestamp, _ = time.Parse("02/Jan/2006:15:04:05.999", timestampStr)
+
+	logLine = logLine[a+b:]
+	// The subsequent string is our frontend
+	if a = strings.Index(logLine, " ") + 1; a == -1 {
+		return &entry
+	}
+	if b = strings.Index(logLine[a:], " "); b == -1 {
+		return &entry
+	}
+	entry.frontend = Dimension{Type: DimensionFrontend, Value: logLine[a : a+b]}
+
+	logLine = logLine[a+b:]
+	// The subsequent string is our backend
+	if a = strings.Index(logLine, " ") + 1; a == -1 {
+		return &entry
+	}
+	if b = strings.Index(logLine[a:], "/"); b == -1 {
+		return &entry
+	}
+	entry.backend = Dimension{Type: DimensionBackend, Value: logLine[a : a+b]}
 
 	logLine = logLine[a+b:]
 	// The first curly-braced block contains our request headers
@@ -97,9 +119,10 @@ type IPList struct {
 	IPs  []*net.IP
 	Nets []*ipNet
 
-	Limit    bool
-	Requests int64
-	ListFile string
+	Limit         bool
+	Requests      int64
+	ListFile      string
+	DimensionType DimensionType `toml:"Dimension"`
 
 	Time          duration
 	Expire        duration
@@ -216,7 +239,7 @@ func (lists IPLists) getRate(ip *net.IP) *ipRate {
 		ipList = lists["_default_"]
 	}
 
-	ipr.bucket = ratelimit.NewBucket(ipList.Time.Duration, ipList.Requests)
+	ipr.buckets = make(map[Dimension]*ratelimit.Bucket)
 	ipr.Expire = time.Now().Add(ipList.Expire.Duration).Unix()
 	ipr.ip = ip
 	ipr.shouldLimit = ipList.Limit
@@ -224,9 +247,47 @@ func (lists IPLists) getRate(ip *net.IP) *ipRate {
 	return &ipr
 }
 
+// getDimension takes in a logEntry and spits out the Dimensions we
+// want to bucket by for this IPList.
+func (l *IPList) getDimension(log *logEntry) *Dimension {
+	switch l.DimensionType {
+	case DimensionBackend:
+		return &log.backend
+	case DimensionFrontend:
+		return &log.frontend
+	}
+	return &Dimension{Type: DimensionNone}
+}
+
+type DimensionType int
+
+const (
+	DimensionNone DimensionType = 1 << iota
+	DimensionBackend
+	DimensionFrontend
+)
+
+func (t *DimensionType) UnmarshalText(b []byte) error {
+	s := string(b)
+	switch s {
+	case "backend":
+		*t = DimensionBackend
+	case "frontend":
+		*t = DimensionFrontend
+	default:
+		return fmt.Errorf("Unrecognized dimension type %s\n", s)
+	}
+	return nil
+}
+
+type Dimension struct {
+	Type  DimensionType
+	Value string
+}
+
 type ipRate struct {
 	ip          *net.IP
-	bucket      *ratelimit.Bucket
+	buckets     map[Dimension]*ratelimit.Bucket
 	entries     []*util.ACLEntry
 	limited     bool
 	shouldLimit bool
@@ -244,10 +305,13 @@ type ipRate struct {
 }
 
 // Records a hit and returns true if it is over limit.
-func (ipr *ipRate) Hit() bool {
+func (ipr *ipRate) Hit(dimension *Dimension) bool {
 	ipr.Lock()
 	defer ipr.Unlock()
-	_, isSoonerThanMaxWait := ipr.bucket.TakeMaxDuration(1, 0)
+	if _, found := ipr.buckets[*dimension]; !found {
+		ipr.buckets[*dimension] = ratelimit.NewBucket(ipr.list.Time.Duration, ipr.list.Requests)
+	}
+	_, isSoonerThanMaxWait := ipr.buckets[*dimension].TakeMaxDuration(1, 0)
 	if ipr.FirstHit == 0 {
 		ipr.FirstHit = time.Now().Unix()
 	}
@@ -595,7 +659,8 @@ func main() {
 					hits.m[log.cdnIP.String()] = ipr
 				}
 				hits.Unlock()
-				overLimit := ipr.Hit()
+				dimension := ipr.list.getDimension(log)
+				overLimit := ipr.Hit(dimension)
 				service, err := serviceDomains.getServiceByHost(log.host)
 				if err != nil {
 					fmt.Printf("Error while finding fastly service for domain %s: %s\n.", log.host, err)
