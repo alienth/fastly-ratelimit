@@ -169,22 +169,23 @@ func readConfig(filename string) (IPLists, error) {
 	return ipLists, nil
 }
 
-func (l *IPList) contains(checkIP *net.IP) bool {
+func (l *IPList) contains(checkIP *net.IP) (bool, int) {
 	if l == nil {
-		return false
+		return false, 0
 	}
 	for _, ip := range l.IPs {
 		if ip.Equal(*checkIP) {
-			return true
+			return true, 32
 		}
 	}
 	for _, net := range l.Nets {
 		if net.Contains(*checkIP) {
-			return true
+			size, _ := net.IPNet.Mask.Size()
+			return true, size
 		}
 	}
 
-	return false
+	return false, 0
 }
 
 // readListFile reads a ListFile and parses the content
@@ -232,10 +233,16 @@ func (l *IPList) readListFile() error {
 func (lists IPLists) getRate(ip *net.IP) *ipRate {
 	var ipr ipRate
 	var ipList *IPList
+	var maskSize int
+	// Iterate through all of the lists and find the list with the most
+	// specific match.
 	for _, l := range lists {
-		if l.contains(ip) {
-			ipList = l
-			break
+		found, size := l.contains(ip)
+		if found {
+			if size > maskSize {
+				maskSize = size
+				ipList = l
+			}
 		}
 	}
 	if ipList == nil {
