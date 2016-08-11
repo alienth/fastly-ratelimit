@@ -117,6 +117,7 @@ type ipNet struct {
 }
 
 type IPList struct {
+	name string
 	IPs  []*net.IP
 	Nets []*ipNet
 
@@ -158,7 +159,8 @@ func readConfig(filename string) (IPLists, error) {
 		return nil, fmt.Errorf("toml parsing error: %s", err)
 	}
 
-	for _, list := range ipLists {
+	for name, list := range ipLists {
+		list.name = name
 		if list.ListFile != "" {
 			list.readListFile()
 		}
