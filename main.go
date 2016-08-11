@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net"
+	"net/http"
 	"os"
 	"path"
 	"strconv"
@@ -567,6 +568,7 @@ func (services ServiceDomains) getServiceByHost(hostname string) (*fastly.Servic
 var client *fastly.Client
 var ipLists IPLists
 var noop bool
+var hits = hitMap{m: make(map[string]*ipRate)}
 
 func main() {
 	app := cli.NewApp()
@@ -601,6 +603,8 @@ func main() {
 		return nil
 	}
 	app.Action = func(c *cli.Context) error {
+		http.HandleFunc("/", handler)
+		go http.ListenAndServe(":80", nil)
 		client, _ = fastly.NewClient(c.GlobalString("fastly-key"))
 		channel := make(syslog.LogPartsChannel)
 		handler := syslog.NewChannelHandler(channel)
@@ -627,7 +631,6 @@ func main() {
 			return cli.NewExitError(fmt.Sprintf("Unable to start server: %s\n", err), -1)
 		}
 
-		var hits = hitMap{m: make(map[string]*ipRate)}
 		if err := hits.importIPRates(serviceDomains); err != nil {
 			return cli.NewExitError(fmt.Sprintf("Error importing existing IP rates: %s", err), -1)
 		}
