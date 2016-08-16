@@ -14,6 +14,7 @@ const (
 	DimensionFrontend
 	DimensionHost
 	DimensionService
+	DimensionUseragent
 )
 
 func (t *DimensionType) UnmarshalText(b []byte) error {
@@ -27,6 +28,8 @@ func (t *DimensionType) UnmarshalText(b []byte) error {
 		*t = DimensionHost
 	case "service":
 		*t = DimensionService
+	case "useragent":
+		*t = DimensionUseragent
 	default:
 		return fmt.Errorf("Unrecognized dimension type %s\n", s)
 	}

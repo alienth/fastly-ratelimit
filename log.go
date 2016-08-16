@@ -13,6 +13,7 @@ type logEntry struct {
 	host      Dimension
 	backend   Dimension
 	frontend  Dimension
+	useragent Dimension
 }
 
 // parseLog takes in an haproxy log line and returns a logEntry.
@@ -80,6 +81,7 @@ func parseLog(logLine string) *logEntry {
 	if len(headers) < 7 {
 		return &entry
 	}
+	entry.useragent = Dimension{Type: DimensionUseragent, Value: headers[1]}
 	entry.host = Dimension{Type: DimensionHost, Value: headers[2]}
 	ipString := headers[7]
 	cdnIP := net.ParseIP(ipString)
