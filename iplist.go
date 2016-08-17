@@ -127,7 +127,7 @@ func (lists IPLists) getRate(ip *net.IP) *ipRate {
 	}
 
 	ipr.buckets = make(map[Dimension]*rateBucket)
-	ipr.Expire = time.Now().Add(ipList.Expire.Duration).Unix()
+	ipr.Expire = time.Now().Add(ipList.Expire.Duration)
 	ipr.ip = ip
 	ipr.shouldLimit = ipList.Limit
 	ipr.list = ipList

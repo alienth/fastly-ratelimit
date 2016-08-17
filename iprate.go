@@ -25,13 +25,13 @@ type ipRate struct {
 	shouldLimit bool
 	list        *IPList
 
-	FirstHit    int64     `json:"first_hit,omitempty"`
-	LastHit     epochTime `json:"last_hit,omitempty"`
-	LastLimit   int64     `json:"last_limit,omitempty"`
+	FirstHit    time.Time `json:"first_hit,omitempty"`
+	LastHit     time.Time `json:"last_hit,omitempty"`
+	LastLimit   time.Time `json:"last_limit,omitempty"`
 	Hits        int       `json:"hits,omitempty"`
 	Strikes     int       `json:"strikes,omitempty"`
-	Expire      int64     `json:"-"`
-	LimitExpire int64     `json:"limit_expire,omitempty"`
+	Expire      time.Time `json:"-"`
+	LimitExpire time.Time `json:"limit_expire,omitempty"`
 
 	sync.RWMutex
 }
@@ -78,12 +78,12 @@ func (ipr *ipRate) Hit(ts time.Time, dimension *Dimension) bool {
 	if waitTime != 0 {
 		overlimit = true
 	}
-	if ipr.FirstHit == 0 {
-		ipr.FirstHit = time.Now().Unix()
+	if ipr.FirstHit.IsZero() {
+		ipr.FirstHit = time.Now()
 	}
-	ipr.LastHit.Time = ts
+	ipr.LastHit = ts
 	ipr.Hits++
-	ipr.Expire = time.Now().Add(ipr.list.Expire.Duration).Unix()
+	ipr.Expire = time.Now().Add(ipr.list.Expire.Duration)
 	return overlimit
 }
 
@@ -103,7 +103,7 @@ func (ipr *ipRate) Limit(service *fastly.Service) error {
 		}
 	}
 
-	ipr.LastLimit = time.Now().Unix()
+	ipr.LastLimit = time.Now()
 	if !ipr.limited {
 		// Only increase the duration time if we're not already
 		// limited.  This is because we might just be applying a limit
@@ -111,8 +111,8 @@ func (ipr *ipRate) Limit(service *fastly.Service) error {
 		ipr.Strikes++
 	}
 	limitDuration := ipr.list.LimitDuration.multiply(float64(ipr.Strikes))
-	ipr.LimitExpire = time.Now().Add(limitDuration.Duration).Unix()
-	ipr.Expire = time.Now().Add(time.Duration(24) * time.Hour).Unix()
+	ipr.LimitExpire = time.Now().Add(limitDuration.Duration)
+	ipr.Expire = time.Now().Add(time.Duration(24) * time.Hour)
 	comment, err := json.Marshal(ipr)
 	if err != nil {
 		return err
@@ -172,7 +172,7 @@ func (ipr *ipRate) cleanSharedBuckets() {
 	sharedBuckets.Lock()
 	defer sharedBuckets.Unlock()
 	for dimension, bucket := range ipr.buckets {
-		if bucket.lastUsed == ipr.LastHit.Time {
+		if bucket.lastUsed == ipr.LastHit {
 			delete(sharedBuckets.m, dimension)
 		}
 	}

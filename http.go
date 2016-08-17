@@ -53,9 +53,9 @@ func handler(w http.ResponseWriter, r *http.Request) {
 
 	sort.Sort(sort.Reverse(hitsSortableIPRates{rates}))
 	for _, ipr := range rates {
-		hps := float64(ipr.Hits) / time.Now().Sub(time.Unix(ipr.FirstHit, 0)).Seconds()
+		hps := float64(ipr.Hits) / time.Now().Sub(ipr.FirstHit).Seconds()
 		if ipr.limited {
-			fmt.Fprintf(w, "<tr><td>%s</td><td>%d</td><td>%t</td><td>%0.2f</td><td>%d</td><td>%0.2fm</td><td>%s</td></tr>\n", ipr.ip.String(), ipr.Hits, ipr.limited, hps, ipr.Strikes, time.Unix(ipr.LimitExpire, 0).Sub(time.Now()).Minutes(), ipr.list.name)
+			fmt.Fprintf(w, "<tr><td>%s</td><td>%d</td><td>%t</td><td>%0.2f</td><td>%d</td><td>%0.2fm</td><td>%s</td></tr>\n", ipr.ip.String(), ipr.Hits, ipr.limited, hps, ipr.Strikes, ipr.LimitExpire.Sub(time.Now()).Minutes(), ipr.list.name)
 		}
 	}
 	fmt.Fprint(w, "</table>")
@@ -63,7 +63,7 @@ func handler(w http.ResponseWriter, r *http.Request) {
 	fmt.Fprint(w, "<h2>Top IPs</h2>\n")
 	fmt.Fprint(w, "<table><th>IP</th><th>Hits</th><th>HPS</th><th>List</th>\n")
 	for _, ipr := range rates {
-		hps := float64(ipr.Hits) / time.Now().Sub(time.Unix(ipr.FirstHit, 0)).Seconds()
+		hps := float64(ipr.Hits) / time.Now().Sub(ipr.FirstHit).Seconds()
 		if hps > 0.5 && ipr.Hits > 50 {
 			fmt.Fprintf(w, "<tr><td>%s</td><td>%d</td><td>%0.2f</td><td>%s</td></tr>\n", ipr.ip.String(), ipr.Hits, hps, ipr.list.name)
 		}
@@ -76,7 +76,7 @@ func handler(w http.ResponseWriter, r *http.Request) {
 	var total float64
 	l := make(map[*IPList]float64)
 	for _, ipr := range rates {
-		hps := float64(ipr.Hits) / time.Now().Sub(time.Unix(ipr.FirstHit, 0)).Seconds()
+		hps := float64(ipr.Hits) / time.Now().Sub(ipr.FirstHit).Seconds()
 		l[ipr.list] += hps
 		total += hps
 	}

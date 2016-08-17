@@ -30,7 +30,7 @@ func (hits *hitMap) expireRecords() {
 	for {
 		hitMapCopy := hits.getMap()
 		for ip, ipr := range hitMapCopy {
-			if ipr.Expire < time.Now().Unix() {
+			if time.Now().After(ipr.Expire) {
 				if err := ipr.RemoveLimit(); err != nil {
 					fmt.Println(err)
 				} else {
@@ -50,7 +50,7 @@ func (hits *hitMap) expireLimits() {
 	for {
 		hitMapCopy := hits.getMap()
 		for _, ipr := range hitMapCopy {
-			if ipr.LimitExpire < time.Now().Unix() {
+			if time.Now().After(ipr.LimitExpire) {
 				if err := ipr.RemoveLimit(); err != nil {
 					fmt.Println(err)
 				}
@@ -100,7 +100,7 @@ func (hits *hitMap) importIPRates(serviceDomains ServiceDomains) error {
 			// comments that we don't recognize.
 			break
 		}
-		if ipr.LastHit.Time.Before(placeholder.LastHit.Time) {
+		if ipr.LastHit.Before(placeholder.LastHit) {
 			json.Unmarshal([]byte(entry.Comment), &ipr)
 		}
 		ipr.limited = true
