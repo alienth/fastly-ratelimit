@@ -147,6 +147,7 @@ func (ipr *ipRate) RemoveLimit() error {
 					newEntries = append(newEntries, e)
 				}
 			}
+			// Unless we had a removal error, this should be an empty list.
 			ipr.entries = newEntries
 		}(ipr)
 		for i, entry := range ipr.entries {
