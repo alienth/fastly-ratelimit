@@ -121,7 +121,7 @@ func main() {
 					continue
 				}
 				dimension := ipr.list.getDimension(log, service)
-				overLimit := ipr.Hit(dimension)
+				overLimit := ipr.Hit(log.timestamp, dimension)
 				if overLimit {
 					if ipr.shouldLimit {
 						if err := ipr.Limit(service); err != nil {

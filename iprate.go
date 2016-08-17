@@ -12,42 +12,76 @@ import (
 	"github.com/juju/ratelimit"
 )
 
+type rateBucket struct {
+	ratelimit.Bucket
+	lastUsed time.Time
+}
+
 type ipRate struct {
 	ip          *net.IP
-	buckets     map[Dimension]*ratelimit.Bucket
+	buckets     map[Dimension]*rateBucket
 	entries     []*util.ACLEntry
 	limited     bool
 	shouldLimit bool
 	list        *IPList
 
-	FirstHit    int64 `json:"first_hit,omitempty"`
-	LastHit     int64 `json:"last_hit,omitempty"`
-	LastLimit   int64 `json:"last_limit,omitempty"`
-	Hits        int   `json:"hits,omitempty"`
-	Strikes     int   `json:"strikes,omitempty"`
-	Expire      int64 `json:"-"`
-	LimitExpire int64 `json:"limit_expire,omitempty"`
+	FirstHit    int64     `json:"first_hit,omitempty"`
+	LastHit     epochTime `json:"last_hit,omitempty"`
+	LastLimit   int64     `json:"last_limit,omitempty"`
+	Hits        int       `json:"hits,omitempty"`
+	Strikes     int       `json:"strikes,omitempty"`
+	Expire      int64     `json:"-"`
+	LimitExpire int64     `json:"limit_expire,omitempty"`
 
 	sync.RWMutex
 }
 
 // Records a hit and returns true if it is over limit.
-func (ipr *ipRate) Hit(dimension *Dimension) bool {
+func (ipr *ipRate) Hit(ts time.Time, dimension *Dimension) bool {
 	ipr.Lock()
 	defer ipr.Unlock()
-	if _, found := ipr.buckets[*dimension]; !found {
-		rate := float64(ipr.list.Requests) / ipr.list.Time.Duration.Seconds()
-		ipr.buckets[*dimension] = ratelimit.NewBucketWithRate(rate, ipr.list.Requests)
+
+	rate := float64(ipr.list.Requests) / ipr.list.Time.Duration.Seconds()
+	var found bool
+	// If DimensionValues were specified in our IPList, check to see if the
+	// dimension passed matches that value. If it doesn't, zero out the
+	// Dimension so that we just track by IP address.
+	if len(ipr.list.DimensionValues) > 0 {
+		for _, value := range ipr.list.DimensionValues {
+			if value == dimension.Value {
+				found = true
+				break
+			}
+		}
+		if found != true {
+			dimension = &Dimension{}
+		}
+	}
+	var bucket *rateBucket
+	if dimension != nil && ipr.list.DimensionShared {
+		sharedBuckets := ipr.list.sharedBuckets
+		sharedBuckets.Lock()
+		if bucket, found = sharedBuckets.m[*dimension]; !found {
+			bucket = &rateBucket{Bucket: *ratelimit.NewBucketWithRate(rate, ipr.list.Requests)}
+			sharedBuckets.m[*dimension] = bucket
+		}
+		sharedBuckets.Unlock()
+		ipr.buckets[*dimension] = bucket
+	}
+	if bucket, found = ipr.buckets[*dimension]; !found {
+		bucket = &rateBucket{Bucket: *ratelimit.NewBucketWithRate(rate, ipr.list.Requests)}
+		ipr.buckets[*dimension] = bucket
 	}
 	var overlimit bool
-	waitTime := ipr.buckets[*dimension].Take(1)
+	waitTime := bucket.Take(1)
+	bucket.lastUsed = ts
 	if waitTime != 0 {
 		overlimit = true
 	}
 	if ipr.FirstHit == 0 {
 		ipr.FirstHit = time.Now().Unix()
 	}
-	ipr.LastHit = time.Now().Unix()
+	ipr.LastHit.Time = ts
 	ipr.Hits++
 	ipr.Expire = time.Now().Add(ipr.list.Expire.Duration).Unix()
 	return overlimit
@@ -126,4 +160,19 @@ func (ipr *ipRate) RemoveLimit() error {
 		ipr.limited = false
 	}
 	return nil
+}
+
+// clean will free any shared bucket from our IPList if this ipRate was the last
+// to utilize that shared bucket.
+func (ipr *ipRate) cleanSharedBuckets() {
+	ipr.Lock()
+	defer ipr.Unlock()
+	sharedBuckets := ipr.list.sharedBuckets
+	sharedBuckets.Lock()
+	defer sharedBuckets.Unlock()
+	for dimension, bucket := range ipr.buckets {
+		if bucket.lastUsed == ipr.LastHit.Time {
+			delete(sharedBuckets.m, dimension)
+		}
+	}
 }

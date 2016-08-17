@@ -37,6 +37,7 @@ func (hits *hitMap) expireRecords() {
 					hits.Lock()
 					delete(hits.m, ip)
 					hits.Unlock()
+					ipr.cleanSharedBuckets()
 				}
 			}
 		}
@@ -99,7 +100,7 @@ func (hits *hitMap) importIPRates(serviceDomains ServiceDomains) error {
 			// comments that we don't recognize.
 			break
 		}
-		if ipr.LastHit < placeholder.LastHit {
+		if ipr.LastHit.Time.Before(placeholder.LastHit.Time) {
 			json.Unmarshal([]byte(entry.Comment), &ipr)
 		}
 		ipr.limited = true

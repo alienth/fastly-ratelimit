@@ -6,10 +6,10 @@ import (
 	"net"
 	"os"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/alienth/go-fastly"
-	"github.com/juju/ratelimit"
 )
 
 type IPList struct {
@@ -17,17 +17,34 @@ type IPList struct {
 	IPs  []*net.IP
 	Nets []*ipNet
 
-	Limit         bool
-	Requests      int64
-	ListFile      string
-	DimensionType DimensionType `toml:"Dimension"`
+	Limit           bool
+	Requests        int64
+	ListFile        string
+	DimensionType   DimensionType `toml:"Dimension"`
+	DimensionShared bool          `toml:"MeasureRateByDimension"`
+	DimensionValues []string
 
 	Time          duration
 	Expire        duration
 	LimitDuration duration
+
+	sharedBuckets *sharedBucketMap
 }
 
 type IPLists map[string]*IPList
+
+type sharedBucketMap struct {
+	sync.RWMutex
+	m map[Dimension]*rateBucket
+}
+
+func (l *IPList) init(name string) {
+	l.name = name
+	if l.ListFile != "" {
+		l.readListFile()
+	}
+	l.sharedBuckets = &sharedBucketMap{m: make(map[Dimension]*rateBucket)}
+}
 
 func (l *IPList) contains(checkIP *net.IP) (bool, int) {
 	if l == nil {
@@ -109,7 +126,7 @@ func (lists IPLists) getRate(ip *net.IP) *ipRate {
 		ipList = lists["_default_"]
 	}
 
-	ipr.buckets = make(map[Dimension]*ratelimit.Bucket)
+	ipr.buckets = make(map[Dimension]*rateBucket)
 	ipr.Expire = time.Now().Add(ipList.Expire.Duration).Unix()
 	ipr.ip = ip
 	ipr.shouldLimit = ipList.Limit
@@ -132,5 +149,3 @@ func (l *IPList) getDimension(log *logEntry, service *fastly.Service) *Dimension
 	}
 	return &Dimension{}
 }
-
-

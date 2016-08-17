@@ -23,10 +23,7 @@ func readConfig(filename string) (IPLists, error) {
 	}
 
 	for name, list := range ipLists {
-		list.name = name
-		if list.ListFile != "" {
-			list.readListFile()
-		}
+		list.init(name)
 	}
 
 	return ipLists, nil
@@ -129,5 +126,19 @@ func (n *ipNet) UnmarshalText(b []byte) error {
 	return err
 }
 
+type epochTime struct {
+	time.Time
+}
 
+func (t *epochTime) UnmarshalText(b []byte) error {
+	epoch, err := strconv.Atoi(string(b))
+	if err != nil {
+		return err
+	}
+	t.Time = time.Unix(int64(epoch), 0)
+	return nil
+}
 
+func (t *epochTime) MarshalText() ([]byte, error) {
+	return []byte(strconv.FormatInt(t.Unix(), 10)), nil
+}
