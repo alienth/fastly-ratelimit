@@ -58,7 +58,7 @@ func (ipr *ipRate) Hit(ts time.Time, dimension *Dimension) bool {
 		}
 	}
 	var bucket *rateBucket
-	if dimension != nil && ipr.list.DimensionShared {
+	if *dimension != (Dimension{}) && ipr.list.DimensionShared {
 		sharedBuckets := ipr.list.sharedBuckets
 		sharedBuckets.Lock()
 		if bucket, found = sharedBuckets.m[*dimension]; !found {

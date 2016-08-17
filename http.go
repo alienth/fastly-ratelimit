@@ -44,7 +44,7 @@ func handler(w http.ResponseWriter, r *http.Request) {
 	fmt.Fprintf(w, "<p>Alloc: %d, HeapObjects: %d</p>", m.Alloc, m.HeapObjects)
 	fmt.Fprintf(w, "<p>Total IPs tracked: %d</p>", len(hits.m))
 	fmt.Fprint(w, "<h2>Limited IPs</h2>\n")
-	fmt.Fprint(w, "<table><th>IP</th><th>Hits</th><th>Limited</th><th>HPS</th><th>Strikes</th><th>Limit Time Remaining</th>\n")
+	fmt.Fprint(w, "<table><th>IP</th><th>Hits</th><th>Limited</th><th>HPS</th><th>Strikes</th><th>Limit Time Remaining</th><th>List</th>\n")
 
 	var rates ipRates
 	for _, ipr := range hitmap {
@@ -55,16 +55,16 @@ func handler(w http.ResponseWriter, r *http.Request) {
 	for _, ipr := range rates {
 		hps := float64(ipr.Hits) / time.Now().Sub(time.Unix(ipr.FirstHit, 0)).Seconds()
 		if ipr.limited {
-			fmt.Fprintf(w, "<tr><td>%s</td><td>%d</td><td>%t</td><td>%0.2f</td><td>%d</td><td>%0.2fm</td></tr>\n", ipr.ip.String(), ipr.Hits, ipr.limited, hps, ipr.Strikes, time.Unix(ipr.LimitExpire, 0).Sub(time.Now()).Minutes())
+			fmt.Fprintf(w, "<tr><td>%s</td><td>%d</td><td>%t</td><td>%0.2f</td><td>%d</td><td>%0.2fm</td><td>%s</td></tr>\n", ipr.ip.String(), ipr.Hits, ipr.limited, hps, ipr.Strikes, time.Unix(ipr.LimitExpire, 0).Sub(time.Now()).Minutes(), ipr.list.name)
 		}
 	}
 	fmt.Fprint(w, "</table>")
 
-	fmt.Fprint(w, "<h2>Whitelisted IPs</h2>\n")
+	fmt.Fprint(w, "<h2>Top IPs</h2>\n")
 	fmt.Fprint(w, "<table><th>IP</th><th>Hits</th><th>HPS</th><th>List</th>\n")
 	for _, ipr := range rates {
 		hps := float64(ipr.Hits) / time.Now().Sub(time.Unix(ipr.FirstHit, 0)).Seconds()
-		if !ipr.shouldLimit && hps > 0.5 {
+		if hps > 0.5 && ipr.Hits > 50 {
 			fmt.Fprintf(w, "<tr><td>%s</td><td>%d</td><td>%0.2f</td><td>%s</td></tr>\n", ipr.ip.String(), ipr.Hits, hps, ipr.list.name)
 		}
 	}
