@@ -2,6 +2,7 @@ package main
 
 import (
 	"fmt"
+	"net"
 	"net/http"
 	"runtime"
 	"sort"
@@ -70,6 +71,43 @@ func handler(w http.ResponseWriter, r *http.Request) {
 	}
 	fmt.Fprint(w, "</table>")
 
+	fmt.Fprintf(w, "<h2>Top /24s</h2>\n")
+	fmt.Fprint(w, "<table><th>Network</th><th>Hits</th><th>HPS</th><th>List</th>\n")
+	ipRatesByNetwork := make(map[string][]*ipRate)
+	mask := net.CIDRMask(24, 32)
+	for _, ipr := range rates {
+		iprIP := *ipr.ip
+		ip := net.IPv4(iprIP[12], iprIP[13], iprIP[14], byte(0))
+		network := net.IPNet{IP: ip, Mask: mask}
+		ipRatesByNetwork[network.IP.String()] = append(ipRatesByNetwork[network.IP.String()], ipr)
+	}
+	var networks networkHPSs
+	for network, rates := range ipRatesByNetwork {
+		var totalHPS float64
+		var totalHits int
+		list := rates[0].list
+		for _, ipr := range rates {
+			hps := float64(ipr.Hits) / time.Now().Sub(ipr.FirstHit).Seconds()
+			totalHPS += hps
+			totalHits += ipr.Hits
+			if ipr.list != list {
+				list = nil
+			}
+		}
+		if totalHits > 10000 || (totalHits > 100 && totalHPS > 1) {
+			networks = append(networks, networkHPS{network: network, hps: totalHPS, hits: totalHits, list: list})
+		}
+	}
+	sort.Sort(sort.Reverse(networks))
+	for _, network := range networks {
+		var list string
+		if network.list != nil {
+			list = network.list.name
+		}
+		fmt.Fprintf(w, "<tr><td><a href=\"https://stat.ripe.net/%s\">%s</a></td><td>%d</td><td>%0.2f</td><td>%s</td></tr>", network.network, network.network, network.hits, network.hps, list)
+	}
+	fmt.Fprint(w, "</table>")
+
 	fmt.Fprint(w, "<h2>Traffic by list</h2>\n")
 	fmt.Fprint(w, "<table><th>List</th><th>HPS</th><th>% of overall traffic</th>\n")
 
@@ -101,3 +139,16 @@ type listHPSs []listHPS
 func (l listHPSs) Len() int           { return len(l) }
 func (l listHPSs) Less(i, j int) bool { return l[i].hps < l[j].hps }
 func (l listHPSs) Swap(i, j int)      { l[i], l[j] = l[j], l[i] }
+
+type networkHPS struct {
+	network string
+	hps     float64
+	hits    int
+	list    *IPList
+}
+
+type networkHPSs []networkHPS
+
+func (l networkHPSs) Len() int           { return len(l) }
+func (l networkHPSs) Less(i, j int) bool { return l[i].hits < l[j].hits }
+func (l networkHPSs) Swap(i, j int)      { l[i], l[j] = l[j], l[i] }
