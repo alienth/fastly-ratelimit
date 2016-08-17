@@ -98,7 +98,8 @@ func (hits *hitMap) importIPRates(serviceDomains ServiceDomains) error {
 		if err != nil {
 			// We may not have created an entry, so ignore entries with
 			// comments that we don't recognize.
-			break
+			fmt.Printf("Found unrecognized ACL comment for IP %s on service %s. Ignoring.\ncomment:\n%s\nError:\n%s\n", ipr.ip.String(), entry.ServiceID, entry.Comment, err)
+			continue
 		}
 		if ipr.LastHit.Before(placeholder.LastHit) {
 			json.Unmarshal([]byte(entry.Comment), &ipr)
