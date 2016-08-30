@@ -92,5 +92,5 @@
 			"revisionTime": "2016-04-25T06:22:39Z"
 		}
 	],
-	"rootPath": "gitlab.stackexchange.com/jharvey/fastly-ratelimit"
+	"rootPath": "gitlab.stackexchange.com/sre/fastly-ratelimit"
 }
