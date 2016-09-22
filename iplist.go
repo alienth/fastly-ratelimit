@@ -144,6 +144,8 @@ func (l *IPList) getDimension(log *logEntry, service *fastly.Service) *Dimension
 		return &log.frontend
 	case DimensionHost:
 		return &log.host
+	case DimensionUseragent:
+		return &log.useragent
 	case DimensionService:
 		return &Dimension{Type: l.DimensionType, Value: service.Name}
 	}
