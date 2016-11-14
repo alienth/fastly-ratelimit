@@ -34,24 +34,18 @@ type ServiceDomains map[*fastly.Service][]fastly.Domain
 func getServiceDomains() (ServiceDomains, error) {
 	serviceDomains := make(ServiceDomains)
 
-	services, err := client.ListServices(&fastly.ListServicesInput{})
+	services, _, err := client.Service.List()
 	if err != nil {
 		return nil, err
 	}
 
 	for _, s := range services {
-		var i fastly.ListDomainsInput
-		i.Service = s.ID
-		i.Version = strconv.Itoa(int(s.ActiveVersion))
-		domains, err := client.ListDomains(&i)
+		domains, _, err := client.Domain.List(s.ID, s.Version)
 		if err != nil {
 			return nil, err
 		}
 
-		var x fastly.ListACLsInput
-		x.Service = s.ID
-		x.Version = strconv.Itoa(int(s.ActiveVersion))
-		acls, err := client.ListACLs(&x)
+		acls, _, err := client.ACL.List(s.ID, s.Version)
 		if err != nil {
 			return nil, err
 		}

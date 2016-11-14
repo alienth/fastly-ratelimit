@@ -7,7 +7,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/alienth/fastlyctl/util"
+	"github.com/alienth/go-fastly"
 )
 
 type hitMap struct {
@@ -62,21 +62,20 @@ func (hits *hitMap) expireLimits() {
 
 // Fetches down remote ACLs and populates local hitMap with previously stored data.
 func (hits *hitMap) importIPRates(serviceDomains ServiceDomains) error {
-	aclEntries := make([]*util.ACLEntry, 0)
+	aclEntries := make([]*fastly.ACLEntry, 0)
 	for service, _ := range serviceDomains {
-		acl, err := util.NewACL(client, service.Name, aclName)
+		acl, _, err := client.ACL.Get(service.ID, service.Version, aclName)
 		if err != nil {
 			return err
 		}
 
-		entries, err := acl.ListEntries()
+		entries, _, err := client.ACLEntry.List(service.ID, acl.ID)
 		if err != nil {
 			return err
 		}
 
 		for _, e := range entries {
-			entry := &util.ACLEntry{Client: client, ID: e.ID, ACLID: e.ACLID, ServiceID: service.ID, IP: e.IP, Comment: e.Comment, Subnet: e.Subnet, Negated: e.Negated}
-			aclEntries = append(aclEntries, entry)
+			aclEntries = append(aclEntries, e)
 		}
 	}
 	for _, entry := range aclEntries {

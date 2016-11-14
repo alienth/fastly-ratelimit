@@ -22,10 +22,11 @@
 			"revisionTime": "2016-08-08T20:09:55Z"
 		},
 		{
-			"checksumSHA1": "qbUReykoaHGB89fo717bbpHsQKI=",
+			"checksumSHA1": "XRFjW7wA5f/C8Bfguzlep/4HoJk=",
+			"origin": "github.com/alienth/fastlyctl/vendor/github.com/alienth/go-fastly",
 			"path": "github.com/alienth/go-fastly",
-			"revision": "17a5424b7b07a5dc39576e932a6d3caabe6fc0b1",
-			"revisionTime": "2016-07-27T21:06:43Z"
+			"revision": "57d0436a7cf65802c2a7ef302e232821bdd679bf",
+			"revisionTime": "2016-11-14T01:19:15Z"
 		},
 		{
 			"checksumSHA1": "Uzyon2091lmwacNsl1hCytjhHtg=",

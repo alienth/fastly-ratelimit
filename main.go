@@ -55,7 +55,7 @@ func main() {
 	app.Action = func(c *cli.Context) error {
 		http.HandleFunc("/", handler)
 		go http.ListenAndServe(":80", nil)
-		client, _ = fastly.NewClient(c.GlobalString("fastly-key"))
+		client = fastly.NewClient(nil, c.GlobalString("fastly-key"))
 		channel := make(syslog.LogPartsChannel)
 		handler := syslog.NewChannelHandler(channel)
 

@@ -7,7 +7,6 @@ import (
 	"sync"
 	"time"
 
-	"github.com/alienth/fastlyctl/util"
 	"github.com/alienth/go-fastly"
 	"github.com/juju/ratelimit"
 )
@@ -20,7 +19,7 @@ type rateBucket struct {
 type ipRate struct {
 	ip          *net.IP
 	buckets     map[Dimension]*rateBucket
-	entries     []*util.ACLEntry
+	entries     []*fastly.ACLEntry
 	limited     bool
 	shouldLimit bool
 	list        *IPList
