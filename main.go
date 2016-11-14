@@ -86,6 +86,7 @@ func main() {
 		}
 		go hits.expireRecords()
 		go hits.expireLimits()
+		go queueFanout()
 		go func(channel syslog.LogPartsChannel) {
 			for logParts := range channel {
 				var line string
@@ -123,12 +124,8 @@ func main() {
 				dimension := ipr.list.getDimension(log, service)
 				overLimit := ipr.Hit(log.timestamp, dimension)
 				if overLimit {
-					if ipr.shouldLimit {
-						if err := ipr.Limit(service); err != nil {
-							fmt.Printf("Error limiting IP: %s\n", err)
-						}
-					} else {
-						//fmt.Println("but is whitelisted so we don't care.")
+					if err := ipr.Limit(service); err != nil {
+						fmt.Printf("Error limiting IP: %s\n", err)
 					}
 				}
 			}

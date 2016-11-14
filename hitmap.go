@@ -31,14 +31,13 @@ func (hits *hitMap) expireRecords() {
 		hitMapCopy := hits.getMap()
 		for ip, ipr := range hitMapCopy {
 			if time.Now().After(ipr.Expire) {
-				if err := ipr.RemoveLimit(); err != nil {
-					fmt.Println(err)
-				} else {
-					hits.Lock()
-					delete(hits.m, ip)
-					hits.Unlock()
-					ipr.cleanSharedBuckets()
+				if ipr.limited {
+					ipr.RemoveLimit()
 				}
+				hits.Lock()
+				delete(hits.m, ip)
+				hits.Unlock()
+				ipr.cleanSharedBuckets()
 			}
 		}
 		hitMapCopy = nil
@@ -50,10 +49,8 @@ func (hits *hitMap) expireLimits() {
 	for {
 		hitMapCopy := hits.getMap()
 		for _, ipr := range hitMapCopy {
-			if time.Now().After(ipr.LimitExpire) {
-				if err := ipr.RemoveLimit(); err != nil {
-					fmt.Println(err)
-				}
+			if ipr.limited && time.Now().After(ipr.LimitExpire) {
+				ipr.RemoveLimit()
 			}
 		}
 		time.Sleep(time.Duration(15) * time.Second)
@@ -103,8 +100,8 @@ func (hits *hitMap) importIPRates(serviceDomains ServiceDomains) error {
 		if ipr.LastHit.Before(placeholder.LastHit) {
 			json.Unmarshal([]byte(entry.Comment), &ipr)
 		}
+		ipr.limitedOnService[entry.ServiceID] = true
 		ipr.limited = true
-		ipr.entries = append(ipr.entries, entry)
 	}
 
 	return nil

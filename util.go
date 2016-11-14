@@ -4,7 +4,6 @@ import (
 	"fmt"
 	"net"
 	"path"
-	"strconv"
 	"strings"
 	"time"
 
@@ -31,6 +30,10 @@ func readConfig(filename string) (IPLists, error) {
 
 type ServiceDomains map[*fastly.Service][]fastly.Domain
 
+var aclByService = make(map[*fastly.Service]*fastly.ACL)
+
+// This also happens to populate the aclByService variable which is used in
+// several functions.
 func getServiceDomains() (ServiceDomains, error) {
 	serviceDomains := make(ServiceDomains)
 
@@ -53,6 +56,7 @@ func getServiceDomains() (ServiceDomains, error) {
 		for _, acl := range acls {
 			if acl.Name == aclName {
 				found = true
+				aclByService[s] = acl
 				break
 			}
 		}

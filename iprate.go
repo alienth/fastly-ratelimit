@@ -17,12 +17,13 @@ type rateBucket struct {
 }
 
 type ipRate struct {
-	ip          *net.IP
-	buckets     map[Dimension]*rateBucket
-	entries     []*fastly.ACLEntry
-	limited     bool
-	shouldLimit bool
-	list        *IPList
+	ip      *net.IP
+	buckets map[Dimension]*rateBucket
+	// Used to signal
+	limited          bool
+	shouldLimit      bool
+	list             *IPList
+	limitedOnService map[string]bool
 
 	FirstHit    time.Time `json:"first_hit,omitempty"`
 	LastHit     time.Time `json:"last_hit,omitempty"`
@@ -34,6 +35,21 @@ type ipRate struct {
 
 	sync.RWMutex
 }
+
+type ipRates []*ipRate
+type hitsSortableIPRates struct{ ipRates }
+
+func (r ipRates) Len() int                       { return len(r) }
+func (r ipRates) Swap(i, j int)                  { r[i], r[j] = r[j], r[i] }
+func (r hitsSortableIPRates) Less(i, j int) bool { return r.ipRates[i].Hits < r.ipRates[j].Hits }
+
+type limitMessage struct {
+	service   *fastly.Service
+	ipRate    *ipRate
+	operation fastly.BatchOperation
+}
+
+var limitCh = make(chan *limitMessage, 200)
 
 // Records a hit and returns true if it is over limit.
 func (ipr *ipRate) Hit(ts time.Time, dimension *Dimension) bool {
@@ -88,78 +104,260 @@ func (ipr *ipRate) Hit(ts time.Time, dimension *Dimension) bool {
 
 // Limit adds an IP to a fastly edge ACL
 func (ipr *ipRate) Limit(service *fastly.Service) error {
-	ipr.Lock()
-	defer ipr.Unlock()
-
-	if !ipr.shouldLimit {
-		return nil
+	if !noop && ipr.shouldLimit {
+		msg := limitMessage{service: service, ipRate: ipr, operation: fastly.BatchOperationCreate}
+		limitCh <- &msg
 	}
 
-	// Return if this IP is already limited on this service.
-	for _, e := range ipr.entries {
-		if e.ServiceID == service.ID {
-			return nil
+	return nil
+}
+
+const APIBulkLimit = 1000
+
+// Processes the limitCh queue and fans out to separate service-specific
+// channels, which are handled by individual processServiceQueue() goroutines.
+func queueFanout() {
+	channelByService := make(map[*fastly.Service]chan *limitMessage)
+	var ok bool
+
+	for msg := range limitCh {
+		var channel chan *limitMessage
+		if channel, ok = channelByService[msg.service]; !ok {
+			channelByService[msg.service] = make(chan *limitMessage, 200)
+			channel = channelByService[msg.service]
+			go processServiceQueue(msg.service, channel)
+		}
+		// Enqueue async to prevent downstream blocking from causing limitCh to pile up.
+		go func(channel chan *limitMessage, msg *limitMessage) { channel <- msg }(channel, msg)
+	}
+}
+
+type ipOp struct {
+	ip        string
+	operation fastly.BatchOperation
+}
+
+// sync with pushACLUpdates to ensure we don't process a single service concurrenly.
+func processServiceQueue(service *fastly.Service, channel chan *limitMessage) {
+	ticker := time.NewTicker(time.Duration(15 * time.Second))
+
+	batch := make([]*limitMessage, 0)
+
+	ratesQueued := make(map[ipOp]bool)
+
+	for {
+		select {
+		case msg := <-channel:
+			key := ipOp{ip: msg.ipRate.ip.String(), operation: msg.operation}
+			if !ratesQueued[key] {
+				batch = append(batch, msg)
+				ratesQueued[key] = true
+				if len(batch)+20 >= APIBulkLimit {
+					pushACLUpdates(service, batch)
+					batch = make([]*limitMessage, 0)
+					ratesQueued = make(map[ipOp]bool)
+				}
+			}
+
+		case _ = <-ticker.C:
+			if len(batch) > 0 {
+				pushACLUpdates(service, batch)
+				batch = make([]*limitMessage, 0)
+				ratesQueued = make(map[ipOp]bool)
+			}
 		}
 	}
 
-	ipr.LastLimit = time.Now()
-	if !ipr.limited {
-		// Only increase the duration time if we're not already
-		// limited.  This is because we might just be applying a limit
-		// to a new service that we saw a hit on.
-		ipr.Strikes++
-	}
-	limitDuration := ipr.list.LimitDuration.multiply(float64(ipr.Strikes))
-	ipr.LimitExpire = time.Now().Add(limitDuration.Duration)
-	ipr.Expire = time.Now().Add(time.Duration(24) * time.Hour)
-	comment, err := json.Marshal(ipr)
+}
+
+// pushACLUpdates takes a slice of *limitMessage and builds a slice of
+// fastly.ACLEntryUpdate, and then calls fastly to execute those updates. It
+// If a failure occurs along the way, it will requeue the batch messages into
+// limitCh.
+func pushACLUpdates(service *fastly.Service, batch []*limitMessage) {
+	updates := make([]fastly.ACLEntryUpdate, 0)
+	acl := aclByService[service]
+	// Holds the ipRates which we need to update the entries for after
+	// creating ACL entries.
+	ratesToUpdate := make(ipRates, 0)
+
+	// Used to track what iprates we're going to be creating, deleting, or
+	// updating so that we don't try to double create or double delete.
+	creating := make(map[*ipRate]bool)
+	deleting := make(map[*ipRate]bool)
+	updating := make(map[*ipRate]bool)
+
+	entries, _, err := client.ACLEntry.List(service.ID, acl.ID)
 	if err != nil {
-		return err
+		fmt.Printf("Error fetching ACL Entry list for %s. Requeuing pending changes. Error: %s\n", service.Name, err)
+		go requeueBatch(batch)
+		return
 	}
-	entry, err := util.NewACLEntry(client, service.Name, aclName, ipr.ip.String(), 0, string(comment), false)
-	if err != nil {
-		return err
+
+	for _, message := range batch {
+		ipr := message.ipRate
+		var existingEntry *fastly.ACLEntry
+		for _, entry := range entries {
+			// TODO handle cases where we are in the ACL multiple times?
+			if entry.IP == ipr.ip.String() {
+				existingEntry = entry
+				break
+			}
+		}
+
+		var update fastly.ACLEntryUpdate
+		update.Operation = message.operation
+
+		switch op := update.Operation; op {
+		case fastly.BatchOperationDelete:
+			if existingEntry == nil || deleting[ipr] {
+				continue
+			}
+			fmt.Printf("Unlimiting IP %s on service %s\n", ipr.ip.String(), service.Name)
+			deleting[ipr] = true
+			update.ID = existingEntry.ID
+		case fastly.BatchOperationCreate:
+			if existingEntry != nil || creating[ipr] {
+				// someone else already updated it
+				continue
+			}
+			creating[ipr] = true
+			update.IP = ipr.ip.String()
+		case fastly.BatchOperationUpdate:
+			if existingEntry == nil {
+				// someone else deleted it
+				continue
+			}
+			updating[ipr] = true
+			update.IP = ipr.ip.String()
+			update.ID = existingEntry.ID
+		}
+
+		ipr.Lock()
+
+		if update.Operation == fastly.BatchOperationCreate {
+			if !ipr.limited {
+				// Only increase the duration time if we're not already
+				// limited.  This is because we might just be applying a limit
+				// to a new service that we saw a hit on.
+				// TODO change this - doesn't work well if we want to update a ban.
+				//
+				// Strikes should increment in the event that
+				// they were banned, and then unbanned, and
+				// then caused trouble again.
+				ipr.Strikes++
+			}
+
+			limitDuration := ipr.list.LimitDuration.multiply(float64(ipr.Strikes))
+			ipr.LimitExpire = time.Now().Add(limitDuration.Duration)
+			fmt.Printf("Limiting IP %s for %d minutes on service %s\n", ipr.ip.String(), int(limitDuration.Minutes()), service.Name)
+			ipr.LastLimit = time.Now()
+			ipr.Expire = time.Now().Add(time.Duration(24) * time.Hour)
+		}
+
+		if update.Operation != fastly.BatchOperationDelete {
+			comment, err := json.Marshal(ipr)
+			// This will probably never happen
+			if err != nil {
+				fmt.Println("Unable to prepare update for %s on %s: %s", ipr.ip.String(), service.Name, err)
+				continue
+			}
+			update.Comment = string(comment)
+		}
+		updates = append(updates, update)
+		ratesToUpdate = append(ratesToUpdate, ipr)
+		ipr.Unlock()
 	}
-	fmt.Printf("Limiting IP %s for %d minutes on service %s\n", ipr.ip.String(), int(limitDuration.Minutes()), service.Name)
-	if !noop {
-		if err = entry.Add(); err != nil {
-			return err
+
+	// This will happen if, for example, all of the iprates in the batch
+	// were already present in the ACL. That can happen because the
+	// mainloop might see more requests which push us over limit after the
+	// IP has already been added to the acl, as the addition to the ACL has
+	// some lag time.
+	if len(updates) == 0 {
+		return
+	}
+
+	if _, err := client.ACLEntry.BatchUpdate(service.ID, acl.ID, updates); err != nil {
+		fmt.Printf("Error updating ACL for %s. Requeuing pending changes. Error: %s\n", service.Name, err)
+		go requeueBatch(batch)
+	}
+
+	// If this fails, then a RemoveLimit() call might assume an entry is
+	// still in the ACL when it isn't. Not disasterous.
+	if err = ratesToUpdate.syncWithACLEntries(service); err != nil {
+		if err != nil {
+			fmt.Printf("Error syncing ip rates with ACL entries for service %s: %s\n", service.Name, err)
 		}
 	}
 
-	ipr.limited = true
-	ipr.entries = append(ipr.entries, entry)
+}
+
+// Takes a batch of messages and sends em back to the limitCh
+func requeueBatch(batch []*limitMessage) {
+	for _, msg := range batch {
+		limitCh <- msg
+	}
+}
+
+// syncWithACLEntries operates on a set of ipRates. It takes a fastly service,
+// lists the ACLEntries on that service, and then updates the ipRate's
+// limitedOnService field based on the results from Fastly.
+func (rates ipRates) syncWithACLEntries(service *fastly.Service) error {
+	entries, _, err := client.ACLEntry.List(service.ID, aclByService[service].ID)
+	if err != nil {
+		return err
+	}
+
+	for _, ipr := range rates {
+		ipr.Lock()
+		found := false
+		for _, entry := range entries {
+			if entry.IP == ipr.ip.String() {
+				found = true
+				break
+			}
+		}
+		if found {
+			ipr.limitedOnService[service.ID] = true
+			ipr.limited = true
+		} else {
+			ipr.limitedOnService[service.ID] = false
+		}
+
+		// See if we're limited by any services, and if not, signal
+		// that this ip is no longer limited.
+		if ipr.limited {
+			found := false
+			for _, limited := range ipr.limitedOnService {
+				if limited {
+					found = true
+					break
+				}
+			}
+			if !found {
+				ipr.limited = false
+			}
+		}
+		ipr.Unlock()
+	}
+
 	return nil
 }
 
 // Removes an IP from ratelimits
-func (ipr *ipRate) RemoveLimit() error {
-	ipr.Lock()
-	defer ipr.Unlock()
-	if len(ipr.entries) > 0 {
-		fmt.Printf("Unlimiting IP %s\n", ipr.ip.String())
-		// defer the filtration in case we get an error during the removal loop
-		defer func(ipr *ipRate) {
-			newEntries := ipr.entries[:0]
-			for _, e := range ipr.entries {
-				if e != nil {
-					newEntries = append(newEntries, e)
-				}
+func (ipr *ipRate) RemoveLimit() {
+	ipr.RLock()
+	defer ipr.RUnlock()
+	if !noop {
+		for service, _ := range aclByService {
+			if ipr.limitedOnService[service.ID] {
+				msg := limitMessage{service: service, ipRate: ipr, operation: fastly.BatchOperationDelete}
+				limitCh <- &msg
 			}
-			// Unless we had a removal error, this should be an empty list.
-			ipr.entries = newEntries
-		}(ipr)
-		for i, entry := range ipr.entries {
-			if !noop {
-				if err := entry.Remove(); err != nil {
-					return fmt.Errorf("Error removing limit for IP %s: %s", ipr.ip.String(), err)
-				}
-			}
-			ipr.entries[i] = nil
 		}
-		ipr.limited = false
 	}
-	return nil
+
 }
 
 // clean will free any shared bucket from our IPList if this ipRate was the last

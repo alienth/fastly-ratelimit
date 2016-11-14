@@ -9,13 +9,6 @@ import (
 	"time"
 )
 
-type ipRates []*ipRate
-type hitsSortableIPRates struct{ ipRates }
-
-func (r ipRates) Len() int                       { return len(r) }
-func (r ipRates) Swap(i, j int)                  { r[i], r[j] = r[j], r[i] }
-func (r hitsSortableIPRates) Less(i, j int) bool { return r.ipRates[i].Hits < r.ipRates[j].Hits }
-
 func header() string {
 	return `
 <!DOCTYPE html>
