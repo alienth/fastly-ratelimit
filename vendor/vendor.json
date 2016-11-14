@@ -9,17 +9,10 @@
 			"revisionTime": "2016-04-26T10:16:13Z"
 		},
 		{
-			"checksumSHA1": "csR8njyJfkweB0RCtfnLwgXNeqQ=",
-			"origin": "github.com/alienth/fastlyctl/vendor/github.com/ajg/form",
-			"path": "github.com/ajg/form",
-			"revision": "4c82df69e01b9daf3c9582206581ae1de0258177",
-			"revisionTime": "2016-07-26T18:43:46Z"
-		},
-		{
-			"checksumSHA1": "mXC29NfJjAKB0MTHD7rcaj6vwIQ=",
+			"checksumSHA1": "+INWtHfuIFLTFCsv2Us55JtkQko=",
 			"path": "github.com/alienth/fastlyctl/util",
-			"revision": "52964d2f94faef7701b84b33a6098cb090ebaf7e",
-			"revisionTime": "2016-08-08T20:09:55Z"
+			"revision": "301edeb9e7aee7c05095726ec7efd31fcbd746b8",
+			"revisionTime": "2016-10-24T23:32:39Z"
 		},
 		{
 			"checksumSHA1": "XRFjW7wA5f/C8Bfguzlep/4HoJk=",
@@ -29,24 +22,10 @@
 			"revisionTime": "2016-11-14T01:19:15Z"
 		},
 		{
-			"checksumSHA1": "Uzyon2091lmwacNsl1hCytjhHtg=",
-			"origin": "github.com/alienth/fastlyctl/vendor/github.com/hashicorp/go-cleanhttp",
-			"path": "github.com/hashicorp/go-cleanhttp",
-			"revision": "4c82df69e01b9daf3c9582206581ae1de0258177",
-			"revisionTime": "2016-07-26T18:43:46Z"
-		},
-		{
 			"checksumSHA1": "sKheT5xw89Tbu2Q071FQO27CVmE=",
 			"path": "github.com/juju/ratelimit",
 			"revision": "77ed1c8a01217656d2080ad51981f6e99adaa177",
 			"revisionTime": "2015-11-25T20:19:25Z"
-		},
-		{
-			"checksumSHA1": "Dz6YPuvQ7AbRoNoc0t1pW4ABF14=",
-			"origin": "github.com/alienth/fastlyctl/vendor/github.com/mitchellh/mapstructure",
-			"path": "github.com/mitchellh/mapstructure",
-			"revision": "4c82df69e01b9daf3c9582206581ae1de0258177",
-			"revisionTime": "2016-07-26T18:43:46Z"
 		},
 		{
 			"checksumSHA1": "hx0Q1JrC6iQDYdkUdGldbzjDMV0=",
@@ -56,11 +35,11 @@
 			"revisionTime": "2016-06-28T05:30:56Z"
 		},
 		{
-			"checksumSHA1": "bA2gANkJBx2Br/p5GKYdhyGo3Pg=",
+			"checksumSHA1": "y3a1tOZVwKCqG2yJZvAYycnelyM=",
 			"origin": "github.com/alienth/fastlyctl/vendor/golang.org/x/crypto/ssh/terminal",
 			"path": "golang.org/x/crypto/ssh/terminal",
-			"revision": "4c82df69e01b9daf3c9582206581ae1de0258177",
-			"revisionTime": "2016-07-26T18:43:46Z"
+			"revision": "301edeb9e7aee7c05095726ec7efd31fcbd746b8",
+			"revisionTime": "2016-10-24T23:32:39Z"
 		},
 		{
 			"checksumSHA1": "EuWwr8wa/Onl90bt97nFgAeYiRg=",
