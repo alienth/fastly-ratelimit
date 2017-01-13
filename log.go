@@ -24,9 +24,7 @@ func parseLog(logLine string) *logEntry {
 	}
 	// This string parsing stuff was lifted from TPS
 	var a, b int
-	if a = strings.Index(logLine, "]:") + 3; a == -1 {
-		return nil
-	}
+	a = 0
 	if b = strings.Index(logLine[a:], ":"); b == -1 {
 		return nil
 	}
