@@ -14,6 +14,7 @@ import (
 
 var client *fastly.Client
 var ipLists IPLists
+var hook hookService
 var noop bool
 
 // TODO pass this along in context to the webserver instead of
@@ -61,10 +62,13 @@ func main() {
 
 		noop = c.GlobalBool("noop")
 
-		var err error
-		if ipLists, err = readConfig(c.GlobalString("config")); err != nil {
+		config, err := readConfig(c.GlobalString("config"))
+		if err != nil {
 			return cli.NewExitError(fmt.Sprintf("Error reading config file:\n%s\n", err), -1)
 		}
+		ipLists = config.Lists
+		hook = config.HookService
+		hook.hookedIPs.m = make(map[string]bool)
 
 		serviceDomains, err := getServiceDomains()
 		if err != nil {
@@ -87,6 +91,10 @@ func main() {
 		go hits.expireRecords()
 		go hits.expireLimits()
 		go queueFanout()
+		if hook.SyncIPsUri != "" {
+			go hits.syncIPsWithHook(hook)
+		}
+
 		go func(channel syslog.LogPartsChannel) {
 			for logParts := range channel {
 				var line string

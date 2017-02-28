@@ -116,6 +116,7 @@ const APIBulkLimit = 1000
 
 // Processes the limitCh queue and fans out to separate service-specific
 // channels, which are handled by individual processServiceQueue() goroutines.
+// Also calls hook service, if applicable.
 func queueFanout() {
 	channelByService := make(map[*fastly.Service]chan *limitMessage)
 	var ok bool
@@ -129,6 +130,22 @@ func queueFanout() {
 		}
 		// Enqueue async to prevent downstream blocking from causing limitCh to pile up.
 		go func(channel chan *limitMessage, msg *limitMessage) { channel <- msg }(channel, msg)
+		// Call our webhooks, if they've been set.
+		if msg.operation == fastly.BatchOperationCreate && hook.AddIPsUri != "" {
+			go func(ip net.IP) {
+				err := hook.Add(ip)
+				if err != nil {
+					fmt.Println("Error calling webhook on IP addition for %s: %s\n", ip.String(), err)
+				}
+			}(*msg.ipRate.ip)
+		} else if msg.operation == fastly.BatchOperationDelete && hook.RemoveIPsUri != "" {
+			go func(ip net.IP) {
+				err := hook.Remove(ip)
+				if err != nil {
+					fmt.Println("Error calling webhook on IP removal for %s: %s\n", ip.String(), err)
+				}
+			}(*msg.ipRate.ip)
+		}
 	}
 }
 

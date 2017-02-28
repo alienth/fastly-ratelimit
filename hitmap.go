@@ -57,6 +57,23 @@ func (hits *hitMap) expireLimits() {
 	}
 }
 
+func (hits *hitMap) syncIPsWithHook(hook hookService) {
+	for {
+		hitMapCopy := hits.getMap()
+		limits := make([]net.IP, 0)
+		for _, ipr := range hitMapCopy {
+			if ipr.limited {
+				limits = append(limits, *ipr.ip)
+			}
+		}
+		if err := hook.Sync(limits); err != nil {
+			fmt.Printf("Error syncing banned IPs with hook service: %s\n", err)
+		}
+
+		time.Sleep(time.Duration(10) * time.Minute)
+	}
+}
+
 // Fetches down remote ACLs and populates local hitMap with previously stored data.
 func (hits *hitMap) importIPRates(serviceDomains ServiceDomains) error {
 	aclEntries := make([]*fastly.ACLEntry, 0)

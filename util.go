@@ -14,18 +14,23 @@ import (
 // The edge ACL which we will be interacting with in fastly.
 const aclName = "ratelimit"
 
-func readConfig(filename string) (IPLists, error) {
-	ipLists := make(IPLists)
+type appConfig struct {
+	HookService hookService
+	Lists       IPLists
+}
 
-	if _, err := toml.DecodeFile(filename, &ipLists); err != nil {
-		return nil, fmt.Errorf("toml parsing error: %s", err)
+func readConfig(filename string) (appConfig, error) {
+	config := appConfig{}
+
+	if _, err := toml.DecodeFile(filename, &config); err != nil {
+		return config, fmt.Errorf("toml parsing error: %s", err)
 	}
 
-	for name, list := range ipLists {
+	for name, list := range config.Lists {
 		list.init(name)
 	}
 
-	return ipLists, nil
+	return config, nil
 }
 
 type ServiceDomains map[*fastly.Service][]fastly.Domain
