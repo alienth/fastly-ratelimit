@@ -10,6 +10,9 @@ import (
 	"github.com/alienth/go-fastly"
 	"github.com/urfave/cli"
 	"gopkg.in/mcuadros/go-syslog.v2"
+
+	_ "expvar"
+	_ "net/http/pprof"
 )
 
 var client *fastly.Client
