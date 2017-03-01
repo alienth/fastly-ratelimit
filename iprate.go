@@ -199,7 +199,8 @@ type ipOp struct {
 
 // sync with pushACLUpdates to ensure we don't process a single service concurrenly.
 func processServiceQueue(service *fastly.Service, channel chan *limitMessage) {
-	ticker := time.NewTicker(time.Duration(15 * time.Second))
+	interval := time.Duration(15 * time.Second)
+	ticker := time.NewTicker(interval)
 
 	batch := make([]*limitMessage, 0)
 
@@ -212,7 +213,7 @@ func processServiceQueue(service *fastly.Service, channel chan *limitMessage) {
 			if !ratesQueued[key] {
 				batch = append(batch, msg)
 				ratesQueued[key] = true
-				if len(batch)+20 >= APIBulkLimit {
+				if len(batch)+20 >= APIBulkLimit || sendImmediately(interval) {
 					pushACLUpdates(service, batch)
 					batch = make([]*limitMessage, 0)
 					ratesQueued = make(map[ipOp]bool)
@@ -403,6 +404,26 @@ func (rates ipRates) syncWithACLEntries(service *fastly.Service) error {
 	}
 
 	return nil
+}
+
+// sendImmediately checks our clients remaining API ratelimit. Takes a
+// time.Duration as an indicator of the maximum amount of time we'd like to
+// wait before sending. If the remaining time in the ratelimit divided by our
+// maximum allowed duration is less than the remaining amount of actions in the
+// ratelimit, return false as we lack the number of requests necessary to meet
+// our guarantee.
+func sendImmediately(guarantee time.Duration) bool {
+	rate := client.RateLimit()
+	if rate == nil {
+		// We don't know the current ratelimit.
+		return false
+	}
+
+	if int(rate.Reset.Sub(time.Now())/guarantee) < rate.Remaining {
+		return false
+	}
+
+	return true
 }
 
 // Removes an IP from ratelimits
