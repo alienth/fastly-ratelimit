@@ -62,12 +62,14 @@ func (hits *hitMap) syncIPsWithHook() {
 		hitMapCopy := hits.getMap()
 		limits := make([]net.IP, 0)
 		for _, ipr := range hitMapCopy {
-			if ipr.limited || ipr.overAnyLimit() {
+			if ipr.limited || (ipr.shouldLimit && ipr.overAnyLimit()) {
 				limits = append(limits, *ipr.ip)
 			}
 		}
-		if err := hook.Sync(limits); err != nil {
-			fmt.Printf("Error syncing banned IPs with hook service: %s\n", err)
+		if !noop {
+			if err := hook.Sync(limits); err != nil {
+				fmt.Printf("Error syncing banned IPs with hook service: %s\n", err)
+			}
 		}
 
 		time.Sleep(time.Duration(10) * time.Minute)
