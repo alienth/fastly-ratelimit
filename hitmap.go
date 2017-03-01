@@ -57,7 +57,7 @@ func (hits *hitMap) expireLimits() {
 	}
 }
 
-func (hits *hitMap) syncIPsWithHook(hook hookService) {
+func (hits *hitMap) syncIPsWithHook() {
 	for {
 		hitMapCopy := hits.getMap()
 		limits := make([]net.IP, 0)

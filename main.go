@@ -95,7 +95,7 @@ func main() {
 		go hits.expireLimits()
 		go queueFanout()
 		if hook.SyncIPsUri != "" {
-			go hits.syncIPsWithHook(hook)
+			go hits.syncIPsWithHook()
 		}
 
 		go func(channel syslog.LogPartsChannel) {
