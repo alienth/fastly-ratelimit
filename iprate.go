@@ -90,7 +90,6 @@ func (ipr *ipRate) getBucketByDimension(dimension *Dimension) *rateBucket {
 	ipr.Lock()
 	defer ipr.Unlock()
 
-	rate := float64(ipr.list.Requests) / ipr.list.Time.Duration.Seconds()
 	var found bool
 	// If DimensionValues were specified in our IPList, check to see if the
 	// dimension passed matches that value. If it doesn't, zero out the
@@ -111,14 +110,14 @@ func (ipr *ipRate) getBucketByDimension(dimension *Dimension) *rateBucket {
 		sharedBuckets := ipr.list.sharedBuckets
 		sharedBuckets.Lock()
 		if bucket, found = sharedBuckets.m[*dimension]; !found {
-			bucket = &rateBucket{Bucket: *ratelimit.NewBucketWithRate(rate, ipr.list.Requests)}
+			bucket = &rateBucket{Bucket: *ratelimit.NewBucketWithQuantum(ipr.list.Time.Duration, ipr.list.Requests, ipr.list.Requests)}
 			sharedBuckets.m[*dimension] = bucket
 		}
 		sharedBuckets.Unlock()
 		ipr.buckets[*dimension] = bucket
 	}
 	if bucket, found = ipr.buckets[*dimension]; !found {
-		bucket = &rateBucket{Bucket: *ratelimit.NewBucketWithRate(rate, ipr.list.Requests)}
+		bucket = &rateBucket{Bucket: *ratelimit.NewBucketWithQuantum(ipr.list.Time.Duration, ipr.list.Requests, ipr.list.Requests)}
 		ipr.buckets[*dimension] = bucket
 	}
 
