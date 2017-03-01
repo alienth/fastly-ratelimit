@@ -62,7 +62,7 @@ func (hits *hitMap) syncIPsWithHook() {
 		hitMapCopy := hits.getMap()
 		limits := make([]net.IP, 0)
 		for _, ipr := range hitMapCopy {
-			if ipr.limited {
+			if ipr.limited || ipr.overAnyLimit() {
 				limits = append(limits, *ipr.ip)
 			}
 		}

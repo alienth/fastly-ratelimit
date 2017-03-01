@@ -51,8 +51,42 @@ type limitMessage struct {
 
 var limitCh = make(chan *limitMessage, 200)
 
-// Records a hit and returns true if it is over limit.
-func (ipr *ipRate) Hit(ts time.Time, dimension *Dimension) bool {
+func (ipr *ipRate) getAllBuckets() []rateBucket {
+	ipr.RLock()
+	defer ipr.RUnlock()
+
+	buckets := make([]rateBucket, 0)
+
+	if ipr.list.DimensionShared {
+		sharedBuckets := ipr.list.sharedBuckets
+		sharedBuckets.RLock()
+		for _, bucket := range sharedBuckets.m {
+			buckets = append(buckets, *bucket)
+		}
+		sharedBuckets.RUnlock()
+	} else {
+		for _, bucket := range ipr.buckets {
+			buckets = append(buckets, *bucket)
+		}
+	}
+
+	return buckets
+}
+
+func (ipr *ipRate) overAnyLimit() bool {
+	buckets := ipr.getAllBuckets()
+
+	for _, bucket := range buckets {
+		if bucket.Available() < 0 {
+			return true
+		}
+	}
+
+	return false
+}
+
+// Initializes bucket if one doesn't already exist.
+func (ipr *ipRate) getBucketByDimension(dimension *Dimension) *rateBucket {
 	ipr.Lock()
 	defer ipr.Unlock()
 
@@ -87,12 +121,22 @@ func (ipr *ipRate) Hit(ts time.Time, dimension *Dimension) bool {
 		bucket = &rateBucket{Bucket: *ratelimit.NewBucketWithRate(rate, ipr.list.Requests)}
 		ipr.buckets[*dimension] = bucket
 	}
+
+	return bucket
+}
+
+// Records a hit and returns true if it is over limit.
+func (ipr *ipRate) Hit(ts time.Time, dimension *Dimension) bool {
+	bucket := ipr.getBucketByDimension(dimension)
 	var overlimit bool
 	waitTime := bucket.Take(1)
 	bucket.lastUsed = ts
 	if waitTime != 0 {
 		overlimit = true
 	}
+
+	ipr.Lock()
+	defer ipr.Unlock()
 	if ipr.FirstHit.IsZero() {
 		ipr.FirstHit = time.Now()
 	}
