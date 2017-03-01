@@ -197,6 +197,13 @@ type ipOp struct {
 	operation fastly.BatchOperation
 }
 
+type timestamp struct {
+	mu sync.Mutex
+	time.Time
+}
+
+var lastPush timestamp
+
 // sync with pushACLUpdates to ensure we don't process a single service concurrenly.
 func processServiceQueue(service *fastly.Service, channel chan *limitMessage) {
 	interval := time.Duration(15 * time.Second)
@@ -236,6 +243,9 @@ func processServiceQueue(service *fastly.Service, channel chan *limitMessage) {
 // If a failure occurs along the way, it will requeue the batch messages into
 // limitCh.
 func pushACLUpdates(service *fastly.Service, batch []*limitMessage) {
+	lastPush.mu.Lock()
+	lastPush.Time = time.Now()
+	lastPush.mu.Unlock()
 	updates := make([]fastly.ACLEntryUpdate, 0)
 	acl := aclByService[service]
 	// Holds the ipRates which we need to update the entries for after
@@ -412,7 +422,13 @@ func (rates ipRates) syncWithACLEntries(service *fastly.Service) error {
 // maximum allowed duration is less than the remaining amount of actions in the
 // ratelimit, return false as we lack the number of requests necessary to meet
 // our guarantee.
+// Also returns false if we already performed an API push within the last second.
 func sendImmediately(guarantee time.Duration) bool {
+	lastPush.mu.Lock()
+	defer lastPush.mu.Unlock()
+	if time.Now().Sub(lastPush.Time) < time.Duration(1)*time.Second {
+		return false
+	}
 	rate := client.RateLimit()
 	if rate == nil {
 		// We don't know the current ratelimit.
