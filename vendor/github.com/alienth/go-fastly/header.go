@@ -74,11 +74,11 @@ func (s *HeaderAction) UnmarshalText(b []byte) error {
 func (s *HeaderAction) MarshalText() ([]byte, error) {
 	switch *s {
 	case HeaderActionSet:
-		return []byte("pass"), nil
+		return []byte("set"), nil
 	case HeaderActionAppend:
-		return []byte("cache"), nil
+		return []byte("append"), nil
 	case HeaderActionDelete:
-		return []byte("restart"), nil
+		return []byte("delete"), nil
 	case HeaderActionRegex:
 		return []byte("regex"), nil
 	case HeaderActionRegexRepeat:
@@ -99,9 +99,10 @@ type Header struct {
 	IgnoreIfSet       Compatibool  `json:"ignore_if_set,omitempty"`
 	Priority          uint         `json:"priority,string,omitempty"`
 	Regex             string       `json:"regex,omitempty"`
-	RequestCondition  string       `json:"request_condition,omitempty"`
-	ResponseCondition string       `json:"response_condition,omitempty"`
+	RequestCondition  string       `json:"request_condition"`
+	ResponseCondition string       `json:"response_condition"`
 	Source            string       `json:"src,omitempty"`
+	Destination       string       `json:"dst,omitempty"`
 	Substitution      string       `json:"substitution,omitempty"`
 	Type              HeaderType   `json:"type,omitempty"`
 }

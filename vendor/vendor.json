@@ -15,11 +15,10 @@
 			"revisionTime": "2016-10-24T23:32:39Z"
 		},
 		{
-			"checksumSHA1": "02QP7wGppqZ9i9gs+lqKOn7HynE=",
-			"origin": "github.com/alienth/fastlyctl/vendor/github.com/alienth/go-fastly",
+			"checksumSHA1": "oBg27QeD50vojQGP5/GTiJrUk2w=",
 			"path": "github.com/alienth/go-fastly",
-			"revision": "15b8390c96aef1a816bedaf430a8303b18b17208",
-			"revisionTime": "2016-11-15T23:52:54Z"
+			"revision": "bf6bc19fa13e8984ce329b6fd3bc2d03f35e95ff",
+			"revisionTime": "2017-03-01T20:54:35Z"
 		},
 		{
 			"checksumSHA1": "sKheT5xw89Tbu2Q071FQO27CVmE=",
@@ -72,5 +71,5 @@
 			"revisionTime": "2016-04-25T06:22:39Z"
 		}
 	],
-	"rootPath": "gitlab.stackexchange.com/sre/fastly-ratelimit"
+	"rootPath": "github.com/alienth/fastly-ratelimit"
 }
