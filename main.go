@@ -78,16 +78,6 @@ func main() {
 			return cli.NewExitError(fmt.Sprintf("Error fetching fasty domains:\n%s\n", err), -1)
 		}
 
-		server := syslog.NewServer()
-		server.SetFormat(syslog.RFC3164)
-		server.SetHandler(handler)
-		if err := server.ListenUDP(c.GlobalString("listen")); err != nil {
-			return cli.NewExitError(fmt.Sprintf("Unable to listen: %s\n", err), -1)
-		}
-		if err := server.Boot(); err != nil {
-			return cli.NewExitError(fmt.Sprintf("Unable to start server: %s\n", err), -1)
-		}
-
 		if err := hits.importIPRates(serviceDomains); err != nil {
 			return cli.NewExitError(fmt.Sprintf("Error importing existing IP rates: %s", err), -1)
 		}
@@ -96,6 +86,16 @@ func main() {
 		go queueFanout()
 		if hook.SyncIPsUri != "" {
 			go hits.syncIPsWithHook()
+		}
+
+		server := syslog.NewServer()
+		server.SetFormat(syslog.RFC3164)
+		server.SetHandler(handler)
+		if err := server.ListenUDP(c.GlobalString("listen")); err != nil {
+			return cli.NewExitError(fmt.Sprintf("Unable to listen: %s\n", err), -1)
+		}
+		if err := server.Boot(); err != nil {
+			return cli.NewExitError(fmt.Sprintf("Unable to start server: %s\n", err), -1)
 		}
 
 		go func(channel syslog.LogPartsChannel) {
