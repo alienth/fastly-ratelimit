@@ -61,99 +61,105 @@ func main() {
 		}
 		return nil
 	}
-	app.Action = func(c *cli.Context) error {
-		http.HandleFunc("/", handler)
-		go http.ListenAndServe(":80", nil)
-		client = fastly.NewClient(nil, c.GlobalString("fastly-key"))
-		syslogChannel = make(syslog.LogPartsChannel, syslogChannelBufferSize)
-		handler := syslog.NewChannelHandler(syslogChannel)
+	app.Action = runServer
 
-		noop = c.GlobalBool("noop")
-
-		config, err := readConfig(c.GlobalString("config"))
-		if err != nil {
-			return cli.NewExitError(fmt.Sprintf("Error reading config file:\n%s\n", err), -1)
-		}
-		ipLists = config.Lists
-		hook = config.HookService
-		hook.hookedIPs.m = make(map[string]bool)
-
-		serviceDomains, err := getServiceDomains()
-		if err != nil {
-			return cli.NewExitError(fmt.Sprintf("Error fetching fasty domains:\n%s\n", err), -1)
-		}
-
-		if err := hits.importIPRates(serviceDomains); err != nil {
-			return cli.NewExitError(fmt.Sprintf("Error importing existing IP rates: %s", err), -1)
-		}
-		go hits.expireRecords()
-		go hits.expireLimits()
-		go queueFanout()
-		if hook.SyncIPsUri != "" {
-			go hits.syncIPsWithHook()
-		}
-
-		server := syslog.NewServer()
-		server.SetFormat(syslog.RFC3164)
-		server.SetHandler(handler)
-		if err := server.ListenUDP(c.GlobalString("listen")); err != nil {
-			return cli.NewExitError(fmt.Sprintf("Unable to listen: %s\n", err), -1)
-		}
-		if err := server.Boot(); err != nil {
-			return cli.NewExitError(fmt.Sprintf("Unable to start server: %s\n", err), -1)
-		}
-
-		go func(channel syslog.LogPartsChannel) {
-			for logParts := range channel {
-				var line string
-				var ok bool
-				if line, ok = logParts["content"].(string); !ok || line == "" {
-					continue
-				}
-				log := parseLog(line)
-				if log == nil || log.cdnIP == nil || log.clientIP == nil {
-					continue
-				}
-				if time.Now().Sub(log.timestamp) > time.Duration(2)*time.Minute {
-					fmt.Printf("Warning: old log line. Log TS: %s, Current time: %s\n", log.timestamp.String(), time.Now().String())
-				}
-				var ipr *ipRate
-				var found bool
-				ts := time.Now()
-				hits.Lock()
-				if d := ts.Sub(time.Now()); d > time.Duration(1)*time.Second {
-					fmt.Printf("Blocked for %d seconds waiting for hits lock\n", int(d.Seconds()))
-				}
-				if ipr, found = hits.m[log.cdnIP.String()]; !found {
-					ipr = ipLists.getRate(log.cdnIP)
-					hits.m[log.cdnIP.String()] = ipr
-				}
-				hits.Unlock()
-				service, err := serviceDomains.getServiceByHost(log.host.Value)
-				if err != nil {
-					fmt.Printf("Error while finding fastly service for domain %s: %s\n.", log.host.Value, err)
-				}
-				if service == nil {
-					fmt.Printf("Found request for host %s which is not in fastly. Ignoring\n", log.host.Value)
-					continue
-				}
-				dimension := ipr.list.getDimension(log, service)
-				overLimit := ipr.Hit(log.timestamp, dimension)
-				if overLimit {
-					if err := ipr.Limit(service); err != nil {
-						fmt.Printf("Error limiting IP: %s\n", err)
-					}
-				}
-
-				if len(channel) == syslogChannelBufferSize {
-					fmt.Println("Warning: log buffer full. We are dropping logs.")
-				}
-			}
-		}(syslogChannel)
-
-		server.Wait()
-
-		return nil
-	}
 	app.Run(os.Args)
+}
+
+func runServer(c *cli.Context) error {
+	http.HandleFunc("/", handler)
+	go http.ListenAndServe(":80", nil)
+	client = fastly.NewClient(nil, c.GlobalString("fastly-key"))
+	syslogChannel = make(syslog.LogPartsChannel, syslogChannelBufferSize)
+	handler := syslog.NewChannelHandler(syslogChannel)
+
+	noop = c.GlobalBool("noop")
+
+	config, err := readConfig(c.GlobalString("config"))
+	if err != nil {
+		return cli.NewExitError(fmt.Sprintf("Error reading config file:\n%s\n", err), -1)
+	}
+	ipLists = config.Lists
+	hook = config.HookService
+	hook.hookedIPs.m = make(map[string]bool)
+
+	serviceDomains, err := getServiceDomains()
+	if err != nil {
+		return cli.NewExitError(fmt.Sprintf("Error fetching fasty domains:\n%s\n", err), -1)
+	}
+
+	if err := hits.importIPRates(serviceDomains); err != nil {
+		return cli.NewExitError(fmt.Sprintf("Error importing existing IP rates: %s", err), -1)
+	}
+	go hits.expireRecords()
+	go hits.expireLimits()
+	go queueFanout()
+	if hook.SyncIPsUri != "" {
+		go hits.syncIPsWithHook()
+	}
+
+	server := syslog.NewServer()
+	server.SetFormat(syslog.RFC3164)
+	server.SetHandler(handler)
+	if err := server.ListenUDP(c.GlobalString("listen")); err != nil {
+		return cli.NewExitError(fmt.Sprintf("Unable to listen: %s\n", err), -1)
+	}
+	if err := server.Boot(); err != nil {
+		return cli.NewExitError(fmt.Sprintf("Unable to start server: %s\n", err), -1)
+	}
+
+	go readLogs(syslogChannel, serviceDomains)
+
+	server.Wait()
+
+	return nil
+}
+
+func readLogs(channel syslog.LogPartsChannel, serviceDomains ServiceDomains) {
+	for logParts := range channel {
+		var line string
+		var ok bool
+		if line, ok = logParts["content"].(string); !ok || line == "" {
+			continue
+		}
+		log := parseLog(line)
+		if log == nil || log.cdnIP == nil || log.clientIP == nil {
+			continue
+		}
+		if time.Now().Sub(log.timestamp) > time.Duration(2)*time.Minute {
+			fmt.Printf("Warning: old log line. Log TS: %s, Current time: %s\n", log.timestamp.String(), time.Now().String())
+		}
+		var ipr *ipRate
+		var found bool
+		ts := time.Now()
+		hits.Lock()
+		if d := ts.Sub(time.Now()); d > time.Duration(1)*time.Second {
+			fmt.Printf("Blocked for %d seconds waiting for hits lock\n", int(d.Seconds()))
+		}
+		if ipr, found = hits.m[log.cdnIP.String()]; !found {
+			ipr = ipLists.getRate(log.cdnIP)
+			hits.m[log.cdnIP.String()] = ipr
+		}
+		hits.Unlock()
+		service, err := serviceDomains.getServiceByHost(log.host.Value)
+		if err != nil {
+			fmt.Printf("Error while finding fastly service for domain %s: %s\n.", log.host.Value, err)
+		}
+		if service == nil {
+			fmt.Printf("Found request for host %s which is not in fastly. Ignoring\n", log.host.Value)
+			continue
+		}
+		dimension := ipr.list.getDimension(log, service)
+		overLimit := ipr.Hit(log.timestamp, dimension)
+		if overLimit {
+			if err := ipr.Limit(service); err != nil {
+				fmt.Printf("Error limiting IP: %s\n", err)
+			}
+		}
+
+		if len(channel) == syslogChannelBufferSize {
+			fmt.Println("Warning: log buffer full. We are dropping logs.")
+		}
+	}
+
 }
