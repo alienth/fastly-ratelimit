@@ -25,6 +25,9 @@ var syslogChannel syslog.LogPartsChannel
 // How many syslog logs we want to buffer, at max.
 const syslogChannelBufferSize = 3000
 
+// How many log reading workers we fire up
+const workers = 2
+
 // TODO pass this along in context to the webserver instead of
 // making it global.
 var hits = hitMap{m: make(map[string]*ipRate)}
@@ -108,7 +111,9 @@ func runServer(c *cli.Context) error {
 		return cli.NewExitError(fmt.Sprintf("Unable to start server: %s\n", err), -1)
 	}
 
-	go readLogs(syslogChannel, serviceDomains)
+	for i := 1; i <= workers; i++ {
+		go readLogs(syslogChannel, serviceDomains)
+	}
 
 	server.Wait()
 
