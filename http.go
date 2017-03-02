@@ -37,6 +37,7 @@ func handler(w http.ResponseWriter, r *http.Request) {
 
 	rate := client.RateLimit()
 	fmt.Fprintf(w, "<p>Alloc: %d, HeapObjects: %d</p>", m.Alloc, m.HeapObjects)
+	fmt.Fprintf(w, "<p>Syslog Channel Buffer Size: %d</p>", len(syslogChannel))
 	fmt.Fprintf(w, "<p>Total IPs tracked: %d</p>", len(hits.m))
 	if rate != nil {
 		fmt.Fprintf(w, "<p>Fastly API ratelimit: %d calls remaining, reset in %v</p>", rate.Remaining, rate.Reset.Sub(time.Now()))

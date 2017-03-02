@@ -20,6 +20,11 @@ var ipLists IPLists
 var hook hookService
 var noop bool
 
+var syslogChannel syslog.LogPartsChannel
+
+// How many syslog logs we want to buffer, at max.
+const syslogChannelBufferSize = 3000
+
 // TODO pass this along in context to the webserver instead of
 // making it global.
 var hits = hitMap{m: make(map[string]*ipRate)}
@@ -60,8 +65,8 @@ func main() {
 		http.HandleFunc("/", handler)
 		go http.ListenAndServe(":80", nil)
 		client = fastly.NewClient(nil, c.GlobalString("fastly-key"))
-		channel := make(syslog.LogPartsChannel)
-		handler := syslog.NewChannelHandler(channel)
+		syslogChannel = make(syslog.LogPartsChannel, syslogChannelBufferSize)
+		handler := syslog.NewChannelHandler(syslogChannel)
 
 		noop = c.GlobalBool("noop")
 
@@ -139,8 +144,12 @@ func main() {
 						fmt.Printf("Error limiting IP: %s\n", err)
 					}
 				}
+
+				if len(channel) == syslogChannelBufferSize {
+					fmt.Println("Warning: log buffer full. We are dropping logs.")
+				}
 			}
-		}(channel)
+		}(syslogChannel)
 
 		server.Wait()
 
