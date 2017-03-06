@@ -2,7 +2,6 @@ package main
 
 import (
 	"encoding/json"
-	"fmt"
 	"net"
 	"sync"
 	"time"
@@ -178,14 +177,14 @@ func queueFanout() {
 			go func(ip net.IP) {
 				err := hook.Add(ip)
 				if err != nil {
-					fmt.Println("Error calling webhook on IP addition for %s: %s\n", ip.String(), err)
+					logger.Println("Error calling webhook on IP addition for %s: %s\n", ip.String(), err)
 				}
 			}(*msg.ipRate.ip)
 		} else if msg.operation == fastly.BatchOperationDelete && hook.RemoveIPsUri != "" {
 			go func(ip net.IP) {
 				err := hook.Remove(ip)
 				if err != nil {
-					fmt.Println("Error calling webhook on IP removal for %s: %s\n", ip.String(), err)
+					logger.Println("Error calling webhook on IP removal for %s: %s\n", ip.String(), err)
 				}
 			}(*msg.ipRate.ip)
 		}
@@ -260,7 +259,7 @@ func pushACLUpdates(service *fastly.Service, batch []*limitMessage) {
 
 	entries, _, err := client.ACLEntry.List(service.ID, acl.ID)
 	if err != nil {
-		fmt.Printf("Error fetching ACL Entry list for %s. Requeuing pending changes. Error: %s\n", service.Name, err)
+		logger.Printf("Error fetching ACL Entry list for %s. Requeuing pending changes. Error: %s\n", service.Name, err)
 		go requeueBatch(batch)
 		return
 	}
@@ -284,7 +283,7 @@ func pushACLUpdates(service *fastly.Service, batch []*limitMessage) {
 			if existingEntry == nil || deleting[ipr] {
 				continue
 			}
-			fmt.Printf("Unlimiting IP %s on service %s\n", ipr.ip.String(), service.Name)
+			logger.Printf("Unlimiting IP %s on service %s\n", ipr.ip.String(), service.Name)
 			deleting[ipr] = true
 			update.ID = existingEntry.ID
 		case fastly.BatchOperationCreate:
@@ -321,7 +320,7 @@ func pushACLUpdates(service *fastly.Service, batch []*limitMessage) {
 
 			limitDuration := ipr.list.LimitDuration.multiply(float64(ipr.Strikes))
 			ipr.LimitExpire = time.Now().Add(limitDuration.Duration)
-			fmt.Printf("Limiting IP %s for %d minutes on service %s\n", ipr.ip.String(), int(limitDuration.Minutes()), service.Name)
+			logger.Printf("Limiting IP %s for %d minutes on service %s\n", ipr.ip.String(), int(limitDuration.Minutes()), service.Name)
 			ipr.LastLimit = time.Now()
 			ipr.Expire = time.Now().Add(time.Duration(24) * time.Hour)
 		}
@@ -330,7 +329,7 @@ func pushACLUpdates(service *fastly.Service, batch []*limitMessage) {
 			comment, err := json.Marshal(ipr)
 			// This will probably never happen
 			if err != nil {
-				fmt.Println("Unable to prepare update for %s on %s: %s", ipr.ip.String(), service.Name, err)
+				logger.Println("Unable to prepare update for %s on %s: %s", ipr.ip.String(), service.Name, err)
 				continue
 			}
 			update.Comment = string(comment)
@@ -350,7 +349,7 @@ func pushACLUpdates(service *fastly.Service, batch []*limitMessage) {
 	}
 
 	if _, err := client.ACLEntry.BatchUpdate(service.ID, acl.ID, updates); err != nil {
-		fmt.Printf("Error updating ACL for %s. Requeuing pending changes. Error: %s\n", service.Name, err)
+		logger.Printf("Error updating ACL for %s. Requeuing pending changes. Error: %s\n", service.Name, err)
 		go requeueBatch(batch)
 	}
 
@@ -358,7 +357,7 @@ func pushACLUpdates(service *fastly.Service, batch []*limitMessage) {
 	// still in the ACL when it isn't. Not disasterous.
 	if err = ratesToUpdate.syncWithACLEntries(service); err != nil {
 		if err != nil {
-			fmt.Printf("Error syncing ip rates with ACL entries for service %s: %s\n", service.Name, err)
+			logger.Printf("Error syncing ip rates with ACL entries for service %s: %s\n", service.Name, err)
 		}
 	}
 
