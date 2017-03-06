@@ -77,7 +77,11 @@ func main() {
 
 func runServer(c *cli.Context) error {
 	http.HandleFunc("/", handler)
-	go http.ListenAndServe(c.GlobalString("stats-listen"), nil)
+	go func(listenAddr string) {
+		if err := http.ListenAndServe(listenAddr, nil); err != nil {
+			logger.Fatalf("Unable to start stats webserver: %s", err)
+		}
+	}(c.GlobalString("stats-listen"))
 	client = fastly.NewClient(nil, c.GlobalString("fastly-key"))
 	syslogChannel = make(syslog.LogPartsChannel, syslogChannelBufferSize)
 	handler := syslog.NewChannelHandler(syslogChannel)
