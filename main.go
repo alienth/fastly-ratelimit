@@ -46,6 +46,11 @@ func main() {
 			Value: "0.0.0.0:514",
 		},
 		cli.StringFlag{
+			Name:  "stats-listen, s",
+			Usage: "Specify listen for web stats interface, `ADDRESS:PORT`.",
+			Value: "0.0.0.0:80",
+		},
+		cli.StringFlag{
 			Name:   "fastly-key, K",
 			Usage:  "Fastly API Key. Can be read from 'fastly_key' file in CWD.",
 			EnvVar: "FASTLY_KEY",
@@ -69,7 +74,7 @@ func main() {
 
 func runServer(c *cli.Context) error {
 	http.HandleFunc("/", handler)
-	go http.ListenAndServe(":80", nil)
+	go http.ListenAndServe(c.GlobalString("stats-listen"), nil)
 	client = fastly.NewClient(nil, c.GlobalString("fastly-key"))
 	syslogChannel = make(syslog.LogPartsChannel, syslogChannelBufferSize)
 	handler := syslog.NewChannelHandler(syslogChannel)
