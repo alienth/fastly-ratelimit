@@ -2,6 +2,7 @@ package main
 
 import (
 	"fmt"
+	golog "log"
 	"net/http"
 	"os"
 	"time"
@@ -29,6 +30,8 @@ const syslogChannelBufferSize = 3000
 const workers = 1
 
 var hits = hitMap{m: make(map[string]*ipRate)}
+
+var logger = golog.New(os.Stdout, "", 0)
 
 func main() {
 	app := cli.NewApp()
@@ -135,7 +138,7 @@ func readLogs(channel syslog.LogPartsChannel, serviceDomains ServiceDomains) {
 			continue
 		}
 		if time.Now().Sub(log.timestamp) > time.Duration(2)*time.Minute {
-			fmt.Printf("Warning: old log line. Log TS: %s, Current time: %s\n", log.timestamp.String(), time.Now().String())
+			logger.Printf("Warning: old log line. Log TS: %s, Current time: %s\n", log.timestamp.String(), time.Now().String())
 		}
 		var ipr *ipRate
 		var found bool
@@ -147,22 +150,22 @@ func readLogs(channel syslog.LogPartsChannel, serviceDomains ServiceDomains) {
 		hits.Unlock()
 		service, err := serviceDomains.getServiceByHost(log.host.Value)
 		if err != nil {
-			fmt.Printf("Error while finding fastly service for domain %s: %s\n.", log.host.Value, err)
+			logger.Printf("Error while finding fastly service for domain %s: %s\n.", log.host.Value, err)
 		}
 		if service == nil {
-			fmt.Printf("Found request for host %s which is not in fastly. Ignoring\n", log.host.Value)
+			logger.Printf("Found request for host %s which is not in fastly. Ignoring\n", log.host.Value)
 			continue
 		}
 		dimension := ipr.list.getDimension(log, service)
 		overLimit := ipr.Hit(log.timestamp, dimension)
 		if overLimit {
 			if err := ipr.Limit(service); err != nil {
-				fmt.Printf("Error limiting IP: %s\n", err)
+				logger.Printf("Error limiting IP: %s\n", err)
 			}
 		}
 
 		if len(channel) == syslogChannelBufferSize {
-			fmt.Println("Warning: log buffer full. We are dropping logs.")
+			logger.Println("Warning: log buffer full. We are dropping logs.")
 		}
 	}
 

@@ -68,7 +68,7 @@ func (hits *hitMap) syncIPsWithHook() {
 		}
 		if !noop {
 			if err := hook.Sync(limits); err != nil {
-				fmt.Printf("Error syncing banned IPs with hook service: %s\n", err)
+				logger.Printf("Error syncing banned IPs with hook service: %s\n", err)
 			}
 		}
 
@@ -113,7 +113,7 @@ func (hits *hitMap) importIPRates(serviceDomains ServiceDomains) error {
 		if err != nil {
 			// We may not have created an entry, so ignore entries with
 			// comments that we don't recognize.
-			fmt.Printf("Found unrecognized ACL comment for IP %s on service %s. Ignoring.\ncomment:\n%s\nError:\n%s\n", ipr.ip.String(), entry.ServiceID, entry.Comment, err)
+			logger.Printf("Found unrecognized ACL comment for IP %s on service %s. Ignoring.\ncomment:\n%s\nError:\n%s\n", ipr.ip.String(), entry.ServiceID, entry.Comment, err)
 			continue
 		}
 		if ipr.LastHit.Before(placeholder.LastHit) {
@@ -131,6 +131,6 @@ func (hits *hitMap) Lock() {
 	ts := time.Now()
 	hits.RWMutex.Lock()
 	if d := ts.Sub(time.Now()); d > time.Duration(1)*time.Second {
-		fmt.Printf("Warning: Blocked for %d seconds waiting for hits lock\n", int(d.Seconds()))
+		logger.Printf("Warning: Blocked for %d seconds waiting for hits lock\n", int(d.Seconds()))
 	}
 }
