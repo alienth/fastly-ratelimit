@@ -86,6 +86,13 @@ func runServer(c *cli.Context) error {
 	syslogChannel = make(syslog.LogPartsChannel, syslogChannelBufferSize)
 	handler := syslog.NewChannelHandler(syslogChannel)
 
+	syslogServer := syslog.NewServer()
+	syslogServer.SetFormat(syslog.RFC3164)
+	syslogServer.SetHandler(handler)
+	if err := syslogServer.ListenUDP(c.GlobalString("listen")); err != nil {
+		return cli.NewExitError(fmt.Sprintf("Unable to start syslog server: %s\n", err), -1)
+	}
+
 	noop = c.GlobalBool("noop")
 
 	config, err := readConfig(c.GlobalString("config"))
@@ -111,21 +118,15 @@ func runServer(c *cli.Context) error {
 		go hits.syncIPsWithHook()
 	}
 
-	server := syslog.NewServer()
-	server.SetFormat(syslog.RFC3164)
-	server.SetHandler(handler)
-	if err := server.ListenUDP(c.GlobalString("listen")); err != nil {
-		return cli.NewExitError(fmt.Sprintf("Unable to listen: %s\n", err), -1)
-	}
-	if err := server.Boot(); err != nil {
-		return cli.NewExitError(fmt.Sprintf("Unable to start server: %s\n", err), -1)
+	if err := syslogServer.Boot(); err != nil {
+		return cli.NewExitError(fmt.Sprintf("Unable to start syslog server: %s\n", err), -1)
 	}
 
 	for i := 1; i <= workers; i++ {
 		go readLogs(syslogChannel, serviceDomains)
 	}
 
-	server.Wait()
+	syslogServer.Wait()
 
 	return nil
 }
