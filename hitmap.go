@@ -125,3 +125,12 @@ func (hits *hitMap) importIPRates(serviceDomains ServiceDomains) error {
 
 	return nil
 }
+
+// Calls our RWMutex Lock(), and prints a warning if we blocked too long.
+func (hits *hitMap) Lock() {
+	ts := time.Now()
+	hits.RWMutex.Lock()
+	if d := ts.Sub(time.Now()); d > time.Duration(1)*time.Second {
+		fmt.Printf("Warning: Blocked for %d seconds waiting for hits lock\n", int(d.Seconds()))
+	}
+}
