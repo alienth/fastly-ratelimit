@@ -75,6 +75,8 @@ func main() {
 	app.Run(os.Args)
 }
 
+var config appConfig
+
 func runServer(c *cli.Context) error {
 	http.HandleFunc("/", handler)
 	go func(listenAddr string) {
@@ -95,8 +97,8 @@ func runServer(c *cli.Context) error {
 
 	noop = c.GlobalBool("noop")
 
-	config, err := readConfig(c.GlobalString("config"))
-	if err != nil {
+	var err error
+	if config, err = readConfig(c.GlobalString("config")); err != nil {
 		return cli.NewExitError(fmt.Sprintf("Error reading config file:\n%s\n", err), -1)
 	}
 	ipLists = config.Lists
@@ -138,7 +140,7 @@ func readLogs(channel syslog.LogPartsChannel, serviceDomains ServiceDomains) {
 		if line, ok = logParts["content"].(string); !ok || line == "" {
 			continue
 		}
-		log := parseLog(line)
+		log := config.logParser.parse(line)
 		if log == nil || log.cdnIP == nil || log.clientIP == nil {
 			continue
 		}
