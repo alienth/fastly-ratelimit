@@ -1,10 +1,49 @@
 package main
 
 import (
+	"fmt"
 	"net"
+	"strconv"
 	"strings"
 	"time"
 )
+
+type logParser interface {
+	parse(logLine string) *logEntry
+	readOptions(map[string]interface{}) error
+}
+
+type LogFormat int
+
+const (
+	HaproxyHTTPLogFormat LogFormat = iota
+)
+
+func (f *LogFormat) UnmarshalText(b []byte) error {
+	switch string(b) {
+	case "HaproxyHTTP":
+		*f = HaproxyHTTPLogFormat
+	default:
+		return fmt.Errorf("Unrecognized log format type %s\n", string(b))
+	}
+	return nil
+}
+
+func (f *LogFormat) parser() logParser {
+	switch *f {
+	case HaproxyHTTPLogFormat:
+		return &HaproxyHTTPLogParser{}
+	}
+	return nil
+}
+
+type HaproxyHTTPLogParser struct {
+	Options struct {
+		UserAgentRequestHeader *uint
+		HostRequestHeader      *uint
+		TrueClientIPHeader     *uint
+	}
+}
 
 type logEntry struct {
 	clientIP  *net.IP
@@ -16,8 +55,64 @@ type logEntry struct {
 	useragent Dimension
 }
 
+func UintPtr(i uint) *uint { return &i }
+
+func (p *HaproxyHTTPLogParser) readOptions(options map[string]interface{}) error {
+
+	converter := func(s string) (*uint, error) {
+		i, err := strconv.Atoi(s)
+		var result uint
+		if err != nil {
+			return &result, err
+		}
+		result = uint(i)
+		return &result, nil
+	}
+
+	var err error
+	for k, v := range options {
+		switch k {
+		case "UserAgentRequestHeader":
+			switch v := v.(type) {
+			case string:
+				if p.Options.UserAgentRequestHeader, err = converter(v); err != nil {
+					return fmt.Errorf("Invalid value for option %s: %s", k, v)
+				}
+			case int64:
+				p.Options.UserAgentRequestHeader = UintPtr(uint(v))
+			}
+		case "HostRequestHeader":
+			switch v := v.(type) {
+			case string:
+				if p.Options.HostRequestHeader, err = converter(v); err != nil {
+					return fmt.Errorf("Invalid value for option %s: %s", k, v)
+				}
+			case int64:
+				p.Options.HostRequestHeader = UintPtr(uint(v))
+			}
+		case "TrueClientIPRequestHeader":
+			switch v := v.(type) {
+			case string:
+				if p.Options.TrueClientIPHeader, err = converter(v); err != nil {
+					return fmt.Errorf("Invalid value for option %s: %s", k, v)
+				}
+			case int64:
+				p.Options.TrueClientIPHeader = UintPtr(uint(v))
+			}
+		default:
+			return fmt.Errorf("Unrecognized option %s", k)
+		}
+	}
+
+	if p.Options.TrueClientIPHeader == nil || p.Options.HostRequestHeader == nil {
+		return fmt.Errorf("Must specify HostRequestHeader and TrueClientIPRequestHeader at minimum.")
+	}
+
+	return nil
+}
+
 // parseLog takes in an haproxy log line and returns a logEntry.
-func parseLog(logLine string) *logEntry {
+func (p *HaproxyHTTPLogParser) parse(logLine string) *logEntry {
 	var entry logEntry
 	if logLine == "" {
 		return nil
@@ -79,9 +174,9 @@ func parseLog(logLine string) *logEntry {
 	if len(headers) < 7 {
 		return &entry
 	}
-	entry.useragent = Dimension{Type: DimensionUseragent, Value: headers[1]}
-	entry.host = Dimension{Type: DimensionHost, Value: headers[2]}
-	ipString := headers[7]
+	entry.useragent = Dimension{Type: DimensionUseragent, Value: headers[*p.Options.UserAgentRequestHeader]}
+	entry.host = Dimension{Type: DimensionHost, Value: headers[*p.Options.HostRequestHeader]}
+	ipString := headers[*p.Options.TrueClientIPHeader]
 	cdnIP := net.ParseIP(ipString)
 	if cdnIP == nil {
 		return &entry

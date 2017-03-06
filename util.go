@@ -15,8 +15,14 @@ import (
 const aclName = "ratelimit"
 
 type appConfig struct {
-	HookService hookService
-	Lists       IPLists
+	Main struct {
+		LogFormat LogFormat
+	} `toml:"main"`
+	LogFormatOptions map[string]interface{}
+	HookService      hookService
+	Lists            IPLists
+
+	logParser logParser
 }
 
 func readConfig(filename string) (appConfig, error) {
@@ -28,6 +34,11 @@ func readConfig(filename string) (appConfig, error) {
 
 	for name, list := range config.Lists {
 		list.init(name)
+	}
+
+	config.logParser = config.Main.LogFormat.parser()
+	if err := config.logParser.readOptions(config.LogFormatOptions); err != nil {
+		return config, err
 	}
 
 	if len(config.Lists) < 1 {
