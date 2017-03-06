@@ -28,8 +28,6 @@ const syslogChannelBufferSize = 3000
 // How many log reading workers we fire up
 const workers = 1
 
-// TODO pass this along in context to the webserver instead of
-// making it global.
 var hits = hitMap{m: make(map[string]*ipRate)}
 
 func main() {
