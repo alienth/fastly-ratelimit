@@ -30,6 +30,14 @@ func readConfig(filename string) (appConfig, error) {
 		list.init(name)
 	}
 
+	if len(config.Lists) < 1 {
+		return config, fmt.Errorf("No IP lists defined in config file.")
+	}
+
+	if _, ok := config.Lists["_default_"]; !ok {
+		return config, fmt.Errorf("No _default_ IP list defined in config file.")
+	}
+
 	return config, nil
 }
 
