@@ -134,11 +134,7 @@ func readLogs(channel syslog.LogPartsChannel, serviceDomains ServiceDomains) {
 		}
 		var ipr *ipRate
 		var found bool
-		ts := time.Now()
 		hits.Lock()
-		if d := ts.Sub(time.Now()); d > time.Duration(1)*time.Second {
-			fmt.Printf("Blocked for %d seconds waiting for hits lock\n", int(d.Seconds()))
-		}
 		if ipr, found = hits.m[log.cdnIP.String()]; !found {
 			ipr = ipLists.getRate(log.cdnIP)
 			hits.m[log.cdnIP.String()] = ipr
