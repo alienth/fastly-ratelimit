@@ -146,6 +146,7 @@ func (ipr *ipRate) Hit(ts time.Time, dimension *Dimension) bool {
 
 // Limit adds an IP to a fastly edge ACL
 func (ipr *ipRate) Limit(service *fastly.Service) error {
+	// TODO address concurrent read
 	if !noop && ipr.shouldLimit {
 		msg := limitMessage{service: service, ipRate: ipr, operation: fastly.BatchOperationCreate}
 		limitCh <- &msg

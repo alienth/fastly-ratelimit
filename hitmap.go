@@ -31,6 +31,7 @@ func (hits *hitMap) expireRecords() {
 		hitMapCopy := hits.getMap()
 		for ip, ipr := range hitMapCopy {
 			if time.Now().After(ipr.Expire) {
+				// TODO address concurrent read
 				if ipr.limited {
 					ipr.RemoveLimit()
 				}
@@ -49,6 +50,7 @@ func (hits *hitMap) expireLimits() {
 	for {
 		hitMapCopy := hits.getMap()
 		for _, ipr := range hitMapCopy {
+			// TODO address concurrent read
 			if ipr.limited && time.Now().After(ipr.LimitExpire) {
 				ipr.RemoveLimit()
 			}
