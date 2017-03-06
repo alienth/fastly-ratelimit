@@ -152,6 +152,18 @@ func (ipr *ipRate) Limit(service *fastly.Service) error {
 		limitCh <- &msg
 	}
 
+	if noop && !ipr.limited {
+		ipr.Lock()
+		defer ipr.Unlock()
+		// Pretend we limited here. Duplicates some of pushACLUpdates.
+		ipr.Strikes++
+		limitDuration := ipr.list.LimitDuration.multiply(float64(ipr.Strikes))
+		ipr.LimitExpire = time.Now().Add(limitDuration.Duration)
+		logger.Printf("NOOP: Would issue limit on IP %s on service %s, for duration of %v.\n", ipr.ip.String(), service.Name, limitDuration.Duration)
+		// Pretend we're limited in noop mode so that messages don't spam.
+		ipr.limited = true
+	}
+
 	return nil
 }
 
@@ -444,15 +456,22 @@ func sendImmediately(guarantee time.Duration) bool {
 
 // Removes an IP from ratelimits
 func (ipr *ipRate) RemoveLimit() {
-	ipr.RLock()
-	defer ipr.RUnlock()
 	if !noop {
+		ipr.RLock()
 		for service, _ := range aclByService {
 			if ipr.limitedOnService[service.ID] {
 				msg := limitMessage{service: service, ipRate: ipr, operation: fastly.BatchOperationDelete}
 				limitCh <- &msg
 			}
 		}
+		ipr.RUnlock()
+	}
+
+	if noop {
+		ipr.Lock()
+		logger.Printf("NOOP: Would remove all limits for IP %s.\n", ipr.ip.String())
+		ipr.limited = false
+		ipr.Unlock()
 	}
 
 }
