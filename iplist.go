@@ -28,6 +28,9 @@ type IPList struct {
 	Expire        duration
 	LimitDuration duration
 
+	// If this is set to true, we'll verbosely print info on this iplist.
+	Verbose bool
+
 	sharedBuckets *sharedBucketMap
 }
 

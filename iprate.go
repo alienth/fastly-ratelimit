@@ -2,6 +2,7 @@ package main
 
 import (
 	"encoding/json"
+	"fmt"
 	"net"
 	"sync"
 	"time"
@@ -118,6 +119,10 @@ func (ipr *ipRate) getBucketByDimension(dimension *Dimension) *rateBucket {
 	if bucket, found = ipr.buckets[*dimension]; !found {
 		bucket = &rateBucket{Bucket: *ratelimit.NewBucketWithQuantum(ipr.list.Time.Duration, ipr.list.Requests, ipr.list.Requests)}
 		ipr.buckets[*dimension] = bucket
+		if ipr.list.Verbose {
+			logger.Printf("Initializing token bucket for IP %s\n", ipr.ip.String())
+
+		}
 	}
 
 	return bucket
@@ -127,6 +132,9 @@ func (ipr *ipRate) getBucketByDimension(dimension *Dimension) *rateBucket {
 func (ipr *ipRate) Hit(ts time.Time, dimension *Dimension) bool {
 	bucket := ipr.getBucketByDimension(dimension)
 	var overlimit bool
+	if ipr.list.Verbose {
+		logger.Printf("Hit by %s. %d tokens remaining.", ipr.ip.String(), bucket.Available())
+	}
 	waitTime := bucket.Take(1)
 	bucket.lastUsed = ts
 	if waitTime != 0 {
@@ -147,6 +155,9 @@ func (ipr *ipRate) Hit(ts time.Time, dimension *Dimension) bool {
 // Limit adds an IP to a fastly edge ACL
 func (ipr *ipRate) Limit(service *fastly.Service) error {
 	if !noop && ipr.shouldLimit {
+		if ipr.list.Verbose {
+			logger.Printf("Ratelimit exceeded. Queuing block for %s.\n", ipr.ip.String())
+		}
 		msg := limitMessage{service: service, ipRate: ipr, operation: fastly.BatchOperationCreate}
 		limitCh <- &msg
 	}
@@ -332,7 +343,11 @@ func pushACLUpdates(service *fastly.Service, batch []*limitMessage) {
 
 			limitDuration := ipr.list.LimitDuration.multiply(float64(ipr.Strikes))
 			ipr.LimitExpire = time.Now().Add(limitDuration.Duration)
-			logger.Printf("Limiting IP %s for %d minutes on service %s\n", ipr.ip.String(), int(limitDuration.Minutes()), service.Name)
+			durationText := fmt.Sprintf("%d minutes", int(limitDuration.Minutes()))
+			if int(limitDuration.Seconds())%60 != 0 {
+				durationText += fmt.Sprintf(" %d seconds", int(limitDuration.Seconds())%60)
+			}
+			logger.Printf("Limiting IP %s for %s on service %s\n", ipr.ip.String(), durationText, service.Name)
 			ipr.LastLimit = time.Now()
 			ipr.Expire = time.Now().Add(time.Duration(24) * time.Hour)
 		}
