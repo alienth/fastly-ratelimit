@@ -461,7 +461,7 @@ func sendImmediately(guarantee time.Duration) bool {
 		return false
 	}
 
-	if int(rate.Reset.Sub(time.Now())/guarantee) < rate.Remaining-20 {
+	if int(rate.Reset.Sub(time.Now())/guarantee)+20 > rate.Remaining {
 		return false
 	}
 
