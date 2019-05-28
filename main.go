@@ -141,7 +141,8 @@ func readLogs(channel syslog.LogPartsChannel, serviceDomains ServiceDomains) {
 			continue
 		}
 		log := config.logParser.parse(line)
-		if log == nil || log.cdnIP == nil || log.clientIP == nil {
+
+		if log == nil || log.cdnIP == nil {
 			continue
 		}
 		if time.Now().Sub(log.timestamp) > time.Duration(2)*time.Minute {
