@@ -135,10 +135,22 @@ func (ipr *ipRate) Hit(ts time.Time, dimension *Dimension) bool {
 	if ipr.list.Verbose {
 		logger.Printf("Hit by %s. %d tokens remaining.", ipr.ip.String(), bucket.Available())
 	}
-	waitTime := bucket.Take(1)
-	bucket.lastUsed = ts
-	if waitTime != 0 {
-		overlimit = true
+
+	// Don't track overlimits on IPs that are already limited.  This is a
+	// bit of a hack to prevent IPs which are already limited from
+	// inflating their strikes and LimitExpire up to huge values.
+	//
+	// This is necessary in an environment where blocked IPs will continue
+	// to generate logged hits. The original mechanism assumed that once an
+	// IP is blocked, no new hits will arrive.
+	//
+	// TODO: Address this more sanely.
+	if !ipr.limited {
+		waitTime := bucket.Take(1)
+		bucket.lastUsed = ts
+		if waitTime != 0 {
+			overlimit = true
+		}
 	}
 
 	ipr.Lock()
