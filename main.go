@@ -60,6 +60,10 @@ func main() {
 			Value:  util.GetFastlyKey(),
 		},
 		cli.BoolFlag{
+			Name: "tcp, t",
+			Usage: "Listens for syslog via TCP",
+		},
+		cli.BoolFlag{
 			Name:  "noop, n",
 			Usage: "Noop mode. Print what we'd do, but don't actually do anything.",
 		},
@@ -91,13 +95,20 @@ func runServer(c *cli.Context) error {
 	syslogServer := syslog.NewServer()
 	syslogServer.SetFormat(syslog.RFC3164)
 	syslogServer.SetHandler(handler)
-	if err := syslogServer.ListenUDP(c.GlobalString("listen")); err != nil {
+
+	var err error
+	if c.GlobalBool("tcp") {
+		err = syslogServer.ListenTCP(c.GlobalString("listen"))
+	} else {
+		err = syslogServer.ListenUDP(c.GlobalString("listen"))
+	}
+
+	if err != nil {
 		return cli.NewExitError(fmt.Sprintf("Unable to start syslog server: %s\n", err), -1)
 	}
 
 	noop = c.GlobalBool("noop")
 
-	var err error
 	if config, err = readConfig(c.GlobalString("config")); err != nil {
 		return cli.NewExitError(fmt.Sprintf("Error reading config file:\n%s\n", err), -1)
 	}
