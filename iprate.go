@@ -209,19 +209,19 @@ func queueFanout() {
 		go func(channel chan *limitMessage, msg *limitMessage) { channel <- msg }(channel, msg)
 		// Call our webhooks, if they've been set.
 		if msg.operation == fastly.BatchOperationCreate && hook.AddIPsUri != "" {
-			go func(ip net.IP) {
-				err := hook.Add(ip)
+			go func(ipr ipRate) {
+				err := hook.Add(ipr)
 				if err != nil {
-					logger.Println("Error calling webhook on IP addition for %s: %s\n", ip.String(), err)
+					logger.Println("Error calling webhook on IP addition for %s: %s\n", ipr.ip.String(), err)
 				}
-			}(*msg.ipRate.ip)
+			}(*msg.ipRate)
 		} else if msg.operation == fastly.BatchOperationDelete && hook.RemoveIPsUri != "" {
-			go func(ip net.IP) {
-				err := hook.Remove(ip)
+			go func(ipr ipRate) {
+				err := hook.Remove(ipr)
 				if err != nil {
-					logger.Println("Error calling webhook on IP removal for %s: %s\n", ip.String(), err)
+					logger.Println("Error calling webhook on IP removal for %s: %s\n", ipr.ip.String(), err)
 				}
-			}(*msg.ipRate.ip)
+			}(*msg.ipRate)
 		}
 	}
 }

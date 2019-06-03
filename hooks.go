@@ -43,35 +43,35 @@ func (h *hookService) sendHTTPHook(ips []net.IP, u string) error {
 	return nil
 }
 
-func (h *hookService) Add(ip net.IP) error {
+func (h *hookService) Add(ipr ipRate) error {
 	if h.AddIPsUri != "" {
 		h.hookedIPs.Lock()
 		defer h.hookedIPs.Unlock()
 		// Short circuit already sent IPs
-		if h.hookedIPs.m[ip.String()] == true {
+		if h.hookedIPs.m[ipr.ip.String()] == true {
 			return nil
 		}
-		err := h.sendHTTPHook([]net.IP{ip}, h.AddIPsUri)
+		err := h.sendHTTPHook([]net.IP{*ipr.ip}, h.AddIPsUri)
 		if err != nil {
 			return err
 		}
 
-		h.hookedIPs.m[ip.String()] = true
+		h.hookedIPs.m[ipr.ip.String()] = true
 	}
 
 	return nil
 }
 
-func (h *hookService) Remove(ip net.IP) error {
+func (h *hookService) Remove(ipr ipRate) error {
 	if h.RemoveIPsUri != "" {
-		err := h.sendHTTPHook([]net.IP{ip}, h.RemoveIPsUri)
+		err := h.sendHTTPHook([]net.IP{*ipr.ip}, h.RemoveIPsUri)
 		if err != nil {
 			return err
 		}
 
 		h.hookedIPs.Lock()
 		defer h.hookedIPs.Unlock()
-		delete(h.hookedIPs.m, ip.String())
+		delete(h.hookedIPs.m, ipr.ip.String())
 	}
 
 	return nil
