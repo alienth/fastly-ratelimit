@@ -59,6 +59,16 @@ func main() {
 			EnvVar: "FASTLY_KEY",
 			Value:  util.GetFastlyKey(),
 		},
+		cli.StringFlag{
+			Name:   "redis-channel, r",
+			Usage:  "Redis Channel.",
+			EnvVar: "REDIS_CHANNEL",
+		},
+		cli.StringFlag{
+			Name:   "redis-address, a",
+			Usage:  "Redis Address.",
+			EnvVar: "REDIS_ADDRESS",
+		},
 		cli.BoolFlag{
 			Name: "tcp, t",
 			Usage: "Listens for syslog via TCP",
@@ -114,7 +124,20 @@ func runServer(c *cli.Context) error {
 	}
 	ipLists = config.Lists
 	hook = config.HookService
+
+	// Override Redis channel and address if set in env var or by cli args
+	if c.GlobalString("redis-channel") != "" {
+		hook.RedisChannel = c.GlobalString("redis-channel")
+	}
+
+	if c.GlobalString("redis-address") != "" {
+		hook.RedisAddr = c.GlobalString("redis-address")
+	}
+
 	hook.hookedIPs.m = make(map[string]bool)
+	if err = hook.init(); err != nil {
+		return cli.NewExitError(fmt.Sprintf("Error setting up hooks:\n%s\n", err), -1)
+	}
 
 	serviceDomains, err := getServiceDomains()
 	if err != nil {

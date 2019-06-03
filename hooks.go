@@ -3,8 +3,11 @@ package main
 import (
 	"bytes"
 	"encoding/json"
+	"fmt"
+	"github.com/go-redis/redis"
 	"net"
 	"net/http"
+	"time"
 )
 
 type ipMap struct {
@@ -18,6 +21,31 @@ type hookService struct {
 	RemoveIPsUri string
 	SyncIPsUri   string
 	hookedIPs    ipMap
+
+	redis               *redis.Client
+	RedisAddr           string
+	RedisChannel        string
+	RedisPublishAdds    bool
+	RedisPublishRemoves bool
+}
+
+func (h *hookService) init() error {
+	if h.RedisAddr != "" {
+		if h.RedisChannel == "" {
+			return fmt.Errorf("RedisChannel must be defined in config in order to publish hooks to redis.")
+		}
+		h.redis = redis.NewClient(&redis.Options{
+			Addr: h.RedisAddr,
+			DB:   0,
+		})
+
+		_, err := h.redis.Ping().Result()
+		if err != nil {
+			h.redis = nil
+			return err
+		}
+	}
+	return nil
 }
 
 func (h *hookService) sendHTTPHook(ips []net.IP, u string) error {
@@ -58,6 +86,29 @@ func (h *hookService) Add(ipr ipRate) error {
 		h.hookedIPs.m[ipr.ip.String()] = true
 	}
 
+	if h.redis != nil && h.RedisPublishAdds {
+		// This info isn't necessarily set by the time we get the hook,
+		// so we're hacking it here.
+		// TODO... don't do this.
+		limitDuration := ipr.list.LimitDuration.multiply(float64(ipr.Strikes))
+		expire := time.Now().Add(limitDuration.Duration)
+
+		messageStruct := struct {
+			IP     string    `json:"ip"`
+			Expire time.Time `json:"expire"`
+		}{ipr.ip.String(), expire}
+		message, err := json.Marshal(messageStruct)
+		if err != nil {
+			return err
+		}
+
+		messageStr := string(message)
+		cmd := h.redis.Publish(h.RedisChannel, messageStr)
+		if err = cmd.Err(); err != nil {
+			return err
+		}
+	}
+
 	return nil
 }
 
@@ -71,6 +122,9 @@ func (h *hookService) Remove(ipr ipRate) error {
 		h.hookedIPs.Lock()
 		defer h.hookedIPs.Unlock()
 		delete(h.hookedIPs.m, ipr.ip.String())
+	}
+	if h.RedisPublishRemoves {
+		return fmt.Errorf("hookService does not yet implement publishing ratelimit removes to redis.")
 	}
 
 	return nil
