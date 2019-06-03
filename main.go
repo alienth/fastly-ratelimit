@@ -70,7 +70,7 @@ func main() {
 			EnvVar: "REDIS_ADDRESS",
 		},
 		cli.BoolFlag{
-			Name: "tcp, t",
+			Name:  "tcp, t",
 			Usage: "Listens for syslog via TCP",
 		},
 		cli.BoolFlag{
