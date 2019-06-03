@@ -74,16 +74,18 @@ func (h *hookService) Remove(ip net.IP) error {
 }
 
 func (h *hookService) Sync(ips []net.IP) error {
-	err := h.send(ips, h.SyncIPsUri)
-	if err != nil {
-		return err
-	}
+	if h.SyncIPsUri != "" {
+		err := h.send(ips, h.SyncIPsUri)
+		if err != nil {
+			return err
+		}
 
-	h.hookedIPs.Lock()
-	defer h.hookedIPs.Unlock()
-	h.hookedIPs.m = make(map[string]bool)
-	for _, ip := range ips {
-		h.hookedIPs.m[ip.String()] = true
+		h.hookedIPs.Lock()
+		defer h.hookedIPs.Unlock()
+		h.hookedIPs.m = make(map[string]bool)
+		for _, ip := range ips {
+			h.hookedIPs.m[ip.String()] = true
+		}
 	}
 
 	return nil
