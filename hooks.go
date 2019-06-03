@@ -21,7 +21,7 @@ type hookService struct {
 	hookedIPs    ipMap
 }
 
-func (h *hookService) send(ips []net.IP, u string) error {
+func (h *hookService) sendHTTPHook(ips []net.IP, u string) error {
 	buf := new(bytes.Buffer)
 	err := json.NewEncoder(buf).Encode(ips)
 	if err != nil {
@@ -50,7 +50,7 @@ func (h *hookService) Add(ip net.IP) error {
 	if h.hookedIPs.m[ip.String()] == true {
 		return nil
 	}
-	err := h.send([]net.IP{ip}, h.AddIPsUri)
+	err := h.sendHTTPHook([]net.IP{ip}, h.AddIPsUri)
 	if err != nil {
 		return err
 	}
@@ -61,7 +61,7 @@ func (h *hookService) Add(ip net.IP) error {
 }
 
 func (h *hookService) Remove(ip net.IP) error {
-	err := h.send([]net.IP{ip}, h.RemoveIPsUri)
+	err := h.sendHTTPHook([]net.IP{ip}, h.RemoveIPsUri)
 	if err != nil {
 		return err
 	}
@@ -75,7 +75,7 @@ func (h *hookService) Remove(ip net.IP) error {
 
 func (h *hookService) Sync(ips []net.IP) error {
 	if h.SyncIPsUri != "" {
-		err := h.send(ips, h.SyncIPsUri)
+		err := h.sendHTTPHook(ips, h.SyncIPsUri)
 		if err != nil {
 			return err
 		}
