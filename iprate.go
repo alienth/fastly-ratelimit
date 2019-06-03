@@ -213,14 +213,14 @@ func queueFanout() {
 			go func(ipr ipRate) {
 				err := hook.Add(ipr)
 				if err != nil {
-					logger.Println("Error calling webhook on IP addition for %s: %s\n", ipr.ip.String(), err)
+					logger.Printf("Error calling webhook on IP addition for %s: %s\n", ipr.ip.String(), err)
 				}
 			}(*msg.ipRate)
 		case fastly.BatchOperationDelete:
 			go func(ipr ipRate) {
 				err := hook.Remove(ipr)
 				if err != nil {
-					logger.Println("Error calling webhook on IP removal for %s: %s\n", ipr.ip.String(), err)
+					logger.Printf("Error calling webhook on IP removal for %s: %s\n", ipr.ip.String(), err)
 				}
 			}(*msg.ipRate)
 		}
