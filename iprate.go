@@ -208,14 +208,15 @@ func queueFanout() {
 		// Enqueue async to prevent downstream blocking from causing limitCh to pile up.
 		go func(channel chan *limitMessage, msg *limitMessage) { channel <- msg }(channel, msg)
 		// Call our webhooks, if they've been set.
-		if msg.operation == fastly.BatchOperationCreate {
+		switch op := msg.operation; op {
+		case fastly.BatchOperationCreate:
 			go func(ipr ipRate) {
 				err := hook.Add(ipr)
 				if err != nil {
 					logger.Println("Error calling webhook on IP addition for %s: %s\n", ipr.ip.String(), err)
 				}
 			}(*msg.ipRate)
-		} else if msg.operation == fastly.BatchOperationDelete {
+		case fastly.BatchOperationDelete:
 			go func(ipr ipRate) {
 				err := hook.Remove(ipr)
 				if err != nil {
