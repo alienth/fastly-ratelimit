@@ -44,31 +44,35 @@ func (h *hookService) sendHTTPHook(ips []net.IP, u string) error {
 }
 
 func (h *hookService) Add(ip net.IP) error {
-	h.hookedIPs.Lock()
-	defer h.hookedIPs.Unlock()
-	// Short circuit already sent IPs
-	if h.hookedIPs.m[ip.String()] == true {
-		return nil
-	}
-	err := h.sendHTTPHook([]net.IP{ip}, h.AddIPsUri)
-	if err != nil {
-		return err
-	}
+	if h.AddIPsUri != "" {
+		h.hookedIPs.Lock()
+		defer h.hookedIPs.Unlock()
+		// Short circuit already sent IPs
+		if h.hookedIPs.m[ip.String()] == true {
+			return nil
+		}
+		err := h.sendHTTPHook([]net.IP{ip}, h.AddIPsUri)
+		if err != nil {
+			return err
+		}
 
-	h.hookedIPs.m[ip.String()] = true
+		h.hookedIPs.m[ip.String()] = true
+	}
 
 	return nil
 }
 
 func (h *hookService) Remove(ip net.IP) error {
-	err := h.sendHTTPHook([]net.IP{ip}, h.RemoveIPsUri)
-	if err != nil {
-		return err
-	}
+	if h.RemoveIPsUri != "" {
+		err := h.sendHTTPHook([]net.IP{ip}, h.RemoveIPsUri)
+		if err != nil {
+			return err
+		}
 
-	h.hookedIPs.Lock()
-	defer h.hookedIPs.Unlock()
-	delete(h.hookedIPs.m, ip.String())
+		h.hookedIPs.Lock()
+		defer h.hookedIPs.Unlock()
+		delete(h.hookedIPs.m, ip.String())
+	}
 
 	return nil
 }
