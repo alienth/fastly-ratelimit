@@ -5,6 +5,7 @@ import (
 	"net"
 	"path"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/BurntSushi/toml"
@@ -146,4 +147,26 @@ func (n *ipNet) UnmarshalText(b []byte) error {
 	_, network, err := net.ParseCIDR(string(b))
 	n.IPNet = *network
 	return err
+}
+
+type rwMutex struct {
+	sync.RWMutex
+}
+
+// A lock which prints a log warning each second we wait for the lock.
+func Lock(m *rwMutex) {
+	done := make(chan struct{})
+	ticker := time.NewTicker(time.Duration(1) * time.Second)
+	start := time.Now()
+	go func() {
+		m.RWMutex.Lock()
+		close(done)
+	}()
+	select {
+	case <-done:
+		break
+	case <-ticker.C:
+		d := start.Sub(time.Now())
+		logger.Printf("Warning: Blocked for %d seconds waiting for lock\n", int(d.Seconds()))
+	}
 }

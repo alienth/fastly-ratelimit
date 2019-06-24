@@ -6,7 +6,6 @@ import (
 	"net"
 	"os"
 	"strings"
-	"sync"
 	"time"
 
 	"github.com/alienth/go-fastly"
@@ -37,7 +36,7 @@ type IPList struct {
 type IPLists map[string]*IPList
 
 type sharedBucketMap struct {
-	sync.RWMutex
+	rwMutex
 	m map[Dimension]*rateBucket
 }
 

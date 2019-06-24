@@ -33,7 +33,7 @@ type ipRate struct {
 	Expire      time.Time `json:"-"`
 	LimitExpire time.Time `json:"limit_expire,omitempty"`
 
-	sync.RWMutex
+	rwMutex
 }
 
 type ipRates []*ipRate

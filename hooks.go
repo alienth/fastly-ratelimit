@@ -5,11 +5,10 @@ import (
 	"encoding/json"
 	"net"
 	"net/http"
-	"sync"
 )
 
 type ipMap struct {
-	sync.RWMutex
+	rwMutex
 	m map[string]bool
 }
 

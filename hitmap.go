@@ -4,14 +4,13 @@ import (
 	"encoding/json"
 	"fmt"
 	"net"
-	"sync"
 	"time"
 
 	"github.com/alienth/go-fastly"
 )
 
 type hitMap struct {
-	sync.RWMutex
+	rwMutex
 	m map[string]*ipRate
 }
 
@@ -125,13 +124,4 @@ func (hits *hitMap) importIPRates(serviceDomains ServiceDomains) error {
 	}
 
 	return nil
-}
-
-// Calls our RWMutex Lock(), and prints a warning if we blocked too long.
-func (hits *hitMap) Lock() {
-	ts := time.Now()
-	hits.RWMutex.Lock()
-	if d := ts.Sub(time.Now()); d > time.Duration(1)*time.Second {
-		logger.Printf("Warning: Blocked for %d seconds waiting for hits lock\n", int(d.Seconds()))
-	}
 }
