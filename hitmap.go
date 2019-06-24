@@ -102,6 +102,7 @@ func (hits *hitMap) importIPRates(serviceDomains ServiceDomains) error {
 			ip := net.ParseIP(entry.IP)
 			ipr = ipLists.getRate(&ip)
 			if ip == nil {
+				hits.Unlock()
 				return fmt.Errorf("Unable to parse IP %s in ACL.")
 			}
 			hits.m[ip.String()] = ipr
