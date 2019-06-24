@@ -255,7 +255,7 @@ func processServiceQueue(service *fastly.Service, channel chan *limitMessage) {
 			if !ratesQueued[key] {
 				batch = append(batch, msg)
 				ratesQueued[key] = true
-				if len(batch)+20 >= APIBulkLimit || sendImmediately(interval) {
+				if len(batch)+20 >= APIBulkLimit || (len(channel) <= 20 && sendImmediately(interval)) {
 					pushACLUpdates(service, batch)
 					batch = make([]*limitMessage, 0)
 					ratesQueued = make(map[ipOp]bool)
