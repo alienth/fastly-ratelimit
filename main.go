@@ -109,6 +109,7 @@ var config appConfig
 func runServer(c *cli.Context) error {
 	http.HandleFunc("/", handler)
 	go func(listenAddr string) {
+		logger.Printf("Listening at: %s", listenAddr)
 		if err := http.ListenAndServe(listenAddr, nil); err != nil {
 			logger.Fatalf("Unable to start stats webserver: %s", err)
 		}
@@ -197,12 +198,15 @@ func readLogs(channel syslog.LogPartsChannel, serviceDomains ServiceDomains) {
 		}
 		var ipr *ipRate
 		var found bool
-		hits.Lock()
-		if ipr, found = hits.m[log.cdnIP.String()]; !found {
+		hits.RLock()
+		ipr, found = hits.m[log.cdnIP.String()]
+		hits.RUnlock()
+		if !found {
 			ipr = ipLists.getRate(log.cdnIP)
+			hits.Lock()
 			hits.m[log.cdnIP.String()] = ipr
+			hits.Unlock()
 		}
-		hits.Unlock()
 		service, err := serviceDomains.getServiceByHost(log.host.Value)
 		if err != nil {
 			logger.Printf("Error while finding fastly service for domain %s: %s\n.", log.host.Value, err)
@@ -211,6 +215,7 @@ func readLogs(channel syslog.LogPartsChannel, serviceDomains ServiceDomains) {
 			logger.Printf("Found request for host %s which is not in fastly. Ignoring\n", log.host.Value)
 			continue
 		}
+		// TODO(peter.novotnak@reddit.com) this may not be threadsafe
 		dimension := ipr.list.getDimension(log, service)
 		overLimit := ipr.Hit(log.timestamp, dimension)
 		if overLimit {
