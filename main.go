@@ -16,22 +16,22 @@ import (
 	_ "net/http/pprof"
 )
 
-var client *fastly.Client
-var ipLists IPLists
-var hook hookService
-var noop bool
+var (
+	// Do not persist any changes
+	noop = false
+	// How many log reading workers we fire up
+	workers = 1
+	// How many syslog logs we want to buffer, at max.
+	syslogChannelBufferSize = 3000
 
-var syslogChannel syslog.LogPartsChannel
-
-// How many syslog logs we want to buffer, at max.
-const syslogChannelBufferSize = 3000
-
-// How many log reading workers we fire up
-const workers = 1
-
-var hits = hitMap{m: make(map[string]*ipRate)}
-
-var logger = golog.New(os.Stdout, "", 0)
+	client  *fastly.Client
+	ipLists IPLists
+	hook    hookService
+	// Map of IP -> rate
+	hits          = hitMap{m: make(map[string]*ipRate)}
+	syslogChannel syslog.LogPartsChannel
+	logger        = golog.New(os.Stdout, "", 0)
+)
 
 func main() {
 	app := cli.NewApp()
@@ -69,13 +69,28 @@ func main() {
 			Usage:  "Redis Address.",
 			EnvVar: "REDIS_ADDRESS",
 		},
+		cli.IntFlag{
+			Name:        "log-workers, w",
+			Usage:       "Number of log processing threads to spawn",
+			EnvVar:      "LOG_WORKERS",
+			Destination: &workers,
+			Value:       workers,
+		},
+		cli.IntFlag{
+			Name:        "syslog-buffer-size",
+			Usage:       "Adjust the size of the syslog buffer",
+			EnvVar:      "SYSLOG_BUFFER_SIZE",
+			Destination: &syslogChannelBufferSize,
+			Value:       syslogChannelBufferSize,
+		},
 		cli.BoolFlag{
 			Name:  "tcp, t",
 			Usage: "Listens for syslog via TCP",
 		},
 		cli.BoolFlag{
-			Name:  "noop, n",
-			Usage: "Noop mode. Print what we'd do, but don't actually do anything.",
+			Name:        "noop, n",
+			Usage:       "Noop mode. Print what we'd do, but don't actually do anything.",
+			Destination: &noop,
 		},
 	}
 	app.Before = func(c *cli.Context) error {
@@ -116,8 +131,6 @@ func runServer(c *cli.Context) error {
 	if err != nil {
 		return cli.NewExitError(fmt.Sprintf("Unable to start syslog server: %s\n", err), -1)
 	}
-
-	noop = c.GlobalBool("noop")
 
 	if config, err = readConfig(c.GlobalString("config")); err != nil {
 		return cli.NewExitError(fmt.Sprintf("Error reading config file:\n%s\n", err), -1)
