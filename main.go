@@ -2,10 +2,11 @@ package main
 
 import (
 	"fmt"
-	golog "log"
 	"net/http"
 	"os"
 	"time"
+
+	golog "log"
 
 	"github.com/alienth/fastlyctl/util"
 	"github.com/alienth/go-fastly"
@@ -215,7 +216,7 @@ func readLogs(channel syslog.LogPartsChannel, serviceDomains ServiceDomains) {
 			logger.Printf("Found request for host %s which is not in fastly. Ignoring\n", log.host.Value)
 			continue
 		}
-		// TODO(peter.novotnak@reddit.com) this may not be threadsafe
+		ipr.Lock()
 		dimension := ipr.list.getDimension(log, service)
 		overLimit := ipr.Hit(log.timestamp, dimension)
 		if overLimit {
@@ -223,6 +224,7 @@ func readLogs(channel syslog.LogPartsChannel, serviceDomains ServiceDomains) {
 				logger.Printf("Error limiting IP: %s\n", err)
 			}
 		}
+		ipr.Unlock()
 
 		if len(channel) == syslogChannelBufferSize {
 			logger.Println("Warning: log buffer full. We are dropping logs.")
