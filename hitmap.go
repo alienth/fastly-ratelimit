@@ -29,8 +29,14 @@ func (hits *hitMap) expireRecords() {
 	for {
 		hitMapCopy := hits.getMap()
 		for ip, ipr := range hitMapCopy {
-			if time.Now().After(ipr.Expire) {
-				if ipr.limited {
+
+			ipr.RLock()
+			expired := time.Now().After(ipr.Expire)
+			limited := ipr.limited
+			ipr.RUnlock()
+
+			if expired {
+				if limited {
 					ipr.RemoveLimit()
 				}
 				hits.Lock()
@@ -38,6 +44,7 @@ func (hits *hitMap) expireRecords() {
 				hits.Unlock()
 				ipr.cleanSharedBuckets()
 			}
+
 		}
 		hitMapCopy = nil
 		time.Sleep(time.Duration(60) * time.Second)
