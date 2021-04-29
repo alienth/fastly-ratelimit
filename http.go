@@ -26,7 +26,7 @@ table, th, td {
 }
 
 func handler(w http.ResponseWriter, r *http.Request) {
-	hitmap := hits.getMap()
+	hitmap := hits.GetMap()
 	if noop {
 		fmt.Fprintf(w, "<h1>In noop mode</h1>\n")
 	}

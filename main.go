@@ -159,14 +159,14 @@ func runServer(c *cli.Context) error {
 		return cli.NewExitError(fmt.Sprintf("Error fetching fasty domains:\n%s\n", err), -1)
 	}
 
-	if err := hits.importIPRates(serviceDomains); err != nil {
+	if err := hits.ImportIPRates(serviceDomains); err != nil {
 		return cli.NewExitError(fmt.Sprintf("Error importing existing IP rates: %s", err), -1)
 	}
-	go hits.expireRecords()
-	go hits.expireLimits()
+	go hits.ExpireRecords()
+	go hits.ExpireLimits()
 	go queueFanout()
 	if hook.SyncIPsUri != "" {
-		go hits.syncIPsWithHook()
+		go hits.SyncIPsWithHook()
 	}
 
 	if err := syslogServer.Boot(); err != nil {
@@ -229,7 +229,10 @@ func readLogs(channel syslog.LogPartsChannel, serviceDomains ServiceDomains) {
 			}
 		}
 
-		if len(channel) == syslogChannelBufferSize {
+		// We disable this message for environments with noop set because these are often debug environments. Debugging
+		// tools tend to slow down execution and cause the binary to spew lines which can overwhelm logging agents or
+		// make reading logs more difficult.
+		if !noop && len(channel) == syslogChannelBufferSize {
 			logger.Println("Warning: log buffer full. We are dropping logs.")
 		}
 	}

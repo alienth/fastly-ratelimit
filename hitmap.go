@@ -14,8 +14,8 @@ type hitMap struct {
 	m map[string]*ipRate
 }
 
-// getMap returns a copy of the hitmap. This is used to prevent long lock times on the hitMap
-func (hits *hitMap) getMap() map[string]*ipRate {
+// GetMap returns a copy of the hitmap. This is used to prevent long lock times on the hitMap
+func (hits *hitMap) GetMap() map[string]*ipRate {
 	newMap := make(map[string]*ipRate)
 	hits.RLock()
 	for ip, ipr := range hits.m {
@@ -25,9 +25,9 @@ func (hits *hitMap) getMap() map[string]*ipRate {
 	return newMap
 }
 
-func (hits *hitMap) expireRecords() {
+func (hits *hitMap) ExpireRecords() {
 	for {
-		hitMapCopy := hits.getMap()
+		hitMapCopy := hits.GetMap()
 		for ip, ipr := range hitMapCopy {
 
 			ipr.RLock()
@@ -51,11 +51,17 @@ func (hits *hitMap) expireRecords() {
 	}
 }
 
-func (hits *hitMap) expireLimits() {
+func (hits *hitMap) ExpireLimits() {
 	for {
-		hitMapCopy := hits.getMap()
+		hitMapCopy := hits.GetMap()
 		for _, ipr := range hitMapCopy {
-			if ipr.limited && time.Now().After(ipr.LimitExpire) {
+
+			ipr.RLock()
+			limitExpire := time.Now().After(ipr.LimitExpire)
+			limited := ipr.limited
+			ipr.RUnlock()
+
+			if limited && limitExpire {
 				ipr.RemoveLimit()
 			}
 		}
@@ -63,12 +69,18 @@ func (hits *hitMap) expireLimits() {
 	}
 }
 
-func (hits *hitMap) syncIPsWithHook() {
+func (hits *hitMap) SyncIPsWithHook() {
 	for {
-		hitMapCopy := hits.getMap()
+		hitMapCopy := hits.GetMap()
 		limits := make([]net.IP, 0)
 		for _, ipr := range hitMapCopy {
-			if ipr.limited || (ipr.shouldLimit && ipr.overAnyLimit()) {
+
+			ipr.RLock()
+			limited := ipr.limited
+			shouldLimit := ipr.shouldLimit
+			ipr.RUnlock()
+
+			if limited || (shouldLimit && ipr.overAnyLimit()) {
 				limits = append(limits, *ipr.ip)
 			}
 		}
@@ -83,7 +95,7 @@ func (hits *hitMap) syncIPsWithHook() {
 }
 
 // Fetches down remote ACLs and populates local hitMap with previously stored data.
-func (hits *hitMap) importIPRates(serviceDomains ServiceDomains) error {
+func (hits *hitMap) ImportIPRates(serviceDomains ServiceDomains) error {
 	aclEntries := make([]*fastly.ACLEntry, 0)
 	for service, _ := range serviceDomains {
 		acl, _, err := client.ACL.Get(service.ID, service.Version, aclName)
@@ -123,11 +135,14 @@ func (hits *hitMap) importIPRates(serviceDomains ServiceDomains) error {
 			logger.Printf("Found unrecognized ACL comment for IP %s on service %s. Ignoring.\ncomment:\n%s\nError:\n%s\n", ipr.ip.String(), entry.ServiceID, entry.Comment, err)
 			continue
 		}
+
+		ipr.Lock()
 		if ipr.LastHit.Before(placeholder.LastHit) {
 			json.Unmarshal([]byte(entry.Comment), &ipr)
 		}
 		ipr.limitedOnService[entry.ServiceID] = true
 		ipr.limited = true
+		ipr.Unlock()
 	}
 
 	return nil
