@@ -131,6 +131,10 @@ func (ipr *ipRate) getBucketByDimension(dimension *Dimension) *rateBucket {
 // Records a hit and returns true if it is over limit.
 func (ipr *ipRate) Hit(ts time.Time, dimension *Dimension) bool {
 	bucket := ipr.getBucketByDimension(dimension)
+
+	ipr.Lock()
+	defer ipr.Unlock()
+
 	var overlimit bool
 	if ipr.list.Verbose {
 		logger.Printf("Hit by %s. %d tokens remaining.", ipr.ip.String(), bucket.Available())
@@ -153,8 +157,6 @@ func (ipr *ipRate) Hit(ts time.Time, dimension *Dimension) bool {
 		}
 	}
 
-	ipr.Lock()
-	defer ipr.Unlock()
 	if ipr.FirstHit.IsZero() {
 		ipr.FirstHit = time.Now()
 	}
@@ -166,6 +168,9 @@ func (ipr *ipRate) Hit(ts time.Time, dimension *Dimension) bool {
 
 // Limit adds an IP to a fastly edge ACL
 func (ipr *ipRate) Limit(service *fastly.Service) error {
+	ipr.Lock()
+	defer ipr.Unlock()
+
 	if !noop && ipr.shouldLimit {
 		if ipr.list.Verbose {
 			logger.Printf("Ratelimit exceeded. Queuing block for %s.\n", ipr.ip.String())
@@ -175,8 +180,6 @@ func (ipr *ipRate) Limit(service *fastly.Service) error {
 	}
 
 	if noop && !ipr.limited {
-		ipr.Lock()
-		defer ipr.Unlock()
 		// Pretend we limited here. Duplicates some of pushACLUpdates.
 		ipr.Strikes++
 		limitDuration := ipr.list.LimitDuration.multiply(float64(ipr.Strikes))

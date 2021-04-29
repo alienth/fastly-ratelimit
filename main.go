@@ -216,15 +216,18 @@ func readLogs(channel syslog.LogPartsChannel, serviceDomains ServiceDomains) {
 			logger.Printf("Found request for host %s which is not in fastly. Ignoring\n", log.host.Value)
 			continue
 		}
+
+		// TODO move this to a method
 		ipr.Lock()
 		dimension := ipr.list.getDimension(log, service)
+		ipr.Unlock()
+
 		overLimit := ipr.Hit(log.timestamp, dimension)
 		if overLimit {
 			if err := ipr.Limit(service); err != nil {
 				logger.Printf("Error limiting IP: %s\n", err)
 			}
 		}
-		ipr.Unlock()
 
 		if len(channel) == syslogChannelBufferSize {
 			logger.Println("Warning: log buffer full. We are dropping logs.")
