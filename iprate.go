@@ -372,7 +372,7 @@ func pushACLUpdates(service *fastly.Service, batch []*limitMessage) {
 			comment, err := json.Marshal(ipr)
 			// This will probably never happen
 			if err != nil {
-				logger.Println("Unable to prepare update for %s on %s: %s", ipr.ip.String(), service.Name, err)
+				logger.Printf("Unable to prepare update for %s on %s: %s", ipr.ip.String(), service.Name, err)
 				continue
 			}
 			update.Comment = string(comment)
